@@ -1,0 +1,38 @@
+[package]
+name = "gauchort"
+version = "0.1.0"
+edition = "2024"
+description = "ECE/CS 285 HW2-HW4: gauchoRT, a ray tracer in Rust, driven by the C++ scene files"
+build = "build.rs"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["rayon", "png", "jpeg", "bmp", "tga", "hdr"] }
+ultraviolet = { version = "0.10", features = ["f64", "bytemuck"] }
+wide = "^0.7"
+bytemuck = "^1"
+rayon = "1"
+smallvec = { version = "1", features = ["union"] }
+
+[build-dependencies]
+# build.rs compiles the C++ scene files with it.
+cc = "1"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true
+
+[features]
+aovnormal = []
+aovalbedo = []
+aovdepth = []

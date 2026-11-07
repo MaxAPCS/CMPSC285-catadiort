@@ -1,0 +1,15 @@
+# the Barcelona Pavilion's tree (eMirage, CC-BY), see models/pavilion
+
+newmtl leafs
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 6.2066
+Ni 1.5000
+map_Kd textures/tree_leafs.png
+map_d textures/tree_leafs_mask.png
+
+newmtl trunk
+Kd 0.2196 0.1765 0.0980
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
