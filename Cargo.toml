@@ -9,9 +9,9 @@ build = "build.rs"
 image = { version = "0.25", default-features = false, features = ["rayon", "png", "jpeg", "bmp", "tga", "hdr"] }
 ultraviolet = { version = "0.10", features = ["f64", "bytemuck"] }
 wide = "^0.7"
-bytemuck = "^1"
+bytemuck = { version = "^1", features = ["derive"] }
 rayon = "1"
-smallvec = { version = "1", features = ["union"] }
+smallvec = { version = "1", features = ["union", "const_new"] }
 
 [build-dependencies]
 # build.rs compiles the C++ scene files with it.
@@ -33,6 +33,7 @@ panic = "abort"
 strip = true
 
 [features]
+aovraydir = []
 aovnormal = []
 aovalbedo = []
 aovdepth = []

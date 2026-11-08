@@ -28,7 +28,7 @@ const IDENTITY: Mat4 = Mat4::new(
 /// level (rt.h, rtMotionBegin). A transform call inside a block multiplies
 /// that pose alone, outside one the CTM and every pose; rtTransformBegin/End
 /// save and restore them with the CTM.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct MotionKey {
     pub time: f32,
     pub m: Mat4,

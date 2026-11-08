@@ -303,8 +303,8 @@ fn integer_at_least(option: &str, value: &str, least: i64) -> i32 {
     }
 }
 
-fn positive_int(option: &str, value: &str) -> i32 {
-    integer_at_least(option, value, 1)
+fn positive_int(option: &str, value: &str) -> u16 {
+    integer_at_least(option, value, 1) as _
 }
 
 fn number(option: &str, value: &str) -> f32 {
@@ -339,9 +339,9 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                     ));
                 }
             }
-            "--width" => o.width = positive_int(a, value_of(args, &mut i, a)),
-            "--height" => o.height = positive_int(a, value_of(args, &mut i, a)),
-            "--spp" => o.spp = positive_int(a, value_of(args, &mut i, a)),
+            "--width" => o.width = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
+            "--height" => o.height = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
+            "--spp" => o.spp = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
             "--max-depth" => o.max_depth = integer_at_least(a, value_of(args, &mut i, a), 0),
             "--threads" => o.threads = positive_int(a, value_of(args, &mut i, a)) as _,
             "--no-accel" => o.no_accel = true,
@@ -422,7 +422,7 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                         o.warp
                     ));
                 };
-                o.warp_count = positive_int(a, value_of(args, &mut i, a));
+                o.warp_count = positive_int(a, value_of(args, &mut i, a)) as _;
                 if *param {
                     o.warp_param = number(a, value_of(args, &mut i, a));
                 }
@@ -484,8 +484,8 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                 }
             }
             "--trace" => {
-                o.trace_x = integer_at_least(a, value_of(args, &mut i, a), 0);
-                o.trace_y = integer_at_least(a, value_of(args, &mut i, a), 0);
+                o.trace_x = integer_at_least(a, value_of(args, &mut i, a), 0) as _;
+                o.trace_y = integer_at_least(a, value_of(args, &mut i, a), 0) as _;
             }
             "--lens" => {
                 o.lens = number(a, value_of(args, &mut i, a));

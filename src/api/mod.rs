@@ -12,12 +12,12 @@ pub(crate) use world::WorldState;
 type RtFloat = f32;
 type RtInt = i32;
 type RtColor = Vec3;
-type RtPoint = [RtFloat; 3];
-type RtVector = [RtFloat; 3];
-type RtNormal = [RtFloat; 3];
+type RtPoint = Vec3;
+type RtVector = Vec3;
+type RtNormal = Vec3;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, PartialEq, Debug)]
 pub struct RtMaterial {
     /// kd: diffuse reflectance per channel, 0 to 1
     pub albedo: RtColor,

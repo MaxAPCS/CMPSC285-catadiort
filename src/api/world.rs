@@ -3,29 +3,60 @@ use ultraviolet::{Mat4, Vec3};
 
 use super::transform;
 use super::*;
-use crate::engine::{DirectionalLight, PointLight, Sphere, SpotLight, World};
+use crate::engine::{DirectionalLight, Material, Mesh, PointLight, Sphere, SpotLight, World};
 
 pub(crate) struct WorldState {
-    pub material: RtMaterial,
     pub shader: Option<unsafe extern "C" fn(*mut RtShadeContext)>,
     pub shaderparams: Option<Arc<[u8]>>,
     pub cutout: Option<unsafe extern "C" fn(*mut RtShadeContext) -> RtInt>,
     pub cutoutparams: Option<Arc<[u8]>>,
 
+    material: usize,
     world: World,
 }
 
 impl WorldState {
     const fn new() -> Self {
         Self {
-            material: RtMaterial::default_material(),
             shader: None,
             shaderparams: None,
             cutout: None,
             cutoutparams: None,
 
+            material: 0,
             world: World::empty(),
         }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
+    fn set_material(&mut self, material: Option<RtMaterial>) {
+        let Some(material) = material else {
+            self.material = 0;
+            debug_assert_eq!(self.get_material(), RtMaterial::default_material());
+            return;
+        };
+        self.material = self.world.materials.len();
+        self.world.materials.push(Material::from(
+            material,
+            self.shader,
+            self.shaderparams.clone(),
+        ));
+        debug_assert_eq!(self.get_material(), material);
+    }
+
+    fn rebind_material(&mut self) {
+        self.set_material(Some(self.get_material()));
+    }
+
+    pub fn get_materialidx(&self) -> usize {
+        self.material
+    }
+
+    fn get_material(&self) -> RtMaterial {
+        (&self.world.materials[self.material]).into()
     }
 }
 
@@ -38,18 +69,19 @@ pub(super) fn take() -> World {
 
 #[inline]
 pub(super) fn clear() {
-    OBJECTSTATE.lock().unwrap().world.clear();
+    OBJECTSTATE.lock().unwrap().reset();
 }
 
 /* attributes ------------------------------------------------------------- */
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rtMaterial(m: *const RtMaterial) {
-    if m.is_null() {
-        return;
-    }
-    // Safety: `m` is null or points at an RtMaterial.
-    OBJECTSTATE.lock().unwrap().material = unsafe { *m };
+    OBJECTSTATE.lock().unwrap().set_material(if m.is_null() {
+        None
+    } else {
+        // Safety: `m` is null or points at an RtMaterial.
+        Some(unsafe { *m })
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -61,7 +93,8 @@ pub extern "C" fn rtSurface(f: RtShaderFn, params: *const core::ffi::c_void, nby
     } else {
         // Safety: `params` is null or points at `nbytes` bytes.
         Some(unsafe { core::slice::from_raw_parts::<u8>(params.cast(), nbytes) }.into())
-    }
+    };
+    os.rebind_material()
 }
 
 #[unsafe(no_mangle)]
@@ -136,8 +169,8 @@ pub extern "C" fn rtSphere(radius: RtFloat) {
     let ctm = transform::get();
 
     let mut os = OBJECTSTATE.lock().unwrap();
-    let obj = Sphere::create(&os, ctm * Mat4::from_scale(radius));
-    if let Some(pl) = PointLight::from_emissive(&obj) {
+    let obj = Sphere::create(&mut os, ctm * Mat4::from_scale(radius));
+    if let Some(pl) = PointLight::from_emissive(&obj, &os.get_material()) {
         os.world.pointlights.push(pl);
     }
     os.world.spheres.push(obj);
@@ -163,17 +196,39 @@ pub unsafe extern "C" fn rtTriangleMesh(
     nverts: RtInt,
     p: *const RtPoint,
     n: *const RtNormal,
-    st: *const RtFloat,
+    st: *const (RtFloat, RtFloat),
     cs: *const RtColor,
     ntris: RtInt,
-    indices: *const RtInt,
+    indices: *const [RtInt; 3],
 ) {
     if nverts <= 0 || ntris <= 0 || p.is_null() || indices.is_null() {
         #[cfg(debug_assertions)]
         println!("rtobject: skipped rtTriangleMesh with nverts {}", nverts);
         return;
     }
-    let _ = (n, st, cs);
-    /* TODO: add a draw call, then bake the mesh to world space and add it and
-     * its triangles to their lists (Workflow, step 7) */
+
+    let nverts = nverts as usize;
+    let p = unsafe { core::slice::from_raw_parts(p, nverts) }.to_vec();
+    let n = if n.is_null() {
+        None
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(n, nverts) }.to_vec())
+    };
+    let st = if st.is_null() {
+        None
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(st, nverts) }.to_vec())
+    };
+    let cs = if cs.is_null() {
+        None
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(cs, nverts) }.to_vec())
+    };
+    let indices = unsafe { core::slice::from_raw_parts(indices, ntris as usize) };
+
+    let ctm = transform::get();
+
+    let mut os = OBJECTSTATE.lock().unwrap();
+    let obj = Mesh::create(&mut os, ctm, indices, p, n, cs, st);
+    os.world.meshes.push(obj);
 }

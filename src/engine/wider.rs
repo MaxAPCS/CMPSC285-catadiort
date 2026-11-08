@@ -1,25 +1,8 @@
-use ultraviolet::{DVec3x4, DVec4x4, Mat4, Vec3, Vec3x4, Vec3x8, Vec4x4, Vec4x8};
-use wide::{CmpGt, CmpLt, f32x4, f32x8, f64x4, i32x4, u32x4};
+use ultraviolet::{DVec3x4, DVec4x4, Mat4, Mat4x4, Vec3x4, Vec3x8, Vec4x4, Vec4x8};
+use wide::{f32x4, f32x8, f64x4, i32x4, u32x4};
 
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
-#[allow(non_upper_case_globals)]
-pub const f64x4_NAN: f64x4 = f64x4::new([f64::NAN; _]);
-
-#[inline]
-pub fn extract_scale_sq(mat: &Mat4) -> Vec3 {
-    let a = mat.as_array();
-
-    // Column vectors of the upper-left 3×3 block:
-    // col0 = (a[0], a[1], a[2])
-    // col1 = (a[4], a[5], a[6])
-    // col2 = (a[8], a[9], a[10])
-    let sx = a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
-    let sy = a[4] * a[4] + a[5] * a[5] + a[6] * a[6];
-    let sz = a[8] * a[8] + a[9] * a[9] + a[10] * a[10];
-
-    Vec3::new(sx, sy, sz)
-}
 
 #[inline]
 pub fn transform_pointx8(mat: &Mat4, p: &Vec3x8) -> Vec3x8 {
@@ -111,54 +94,17 @@ pub fn transform_vecx4d(mat: &Mat4, v: &Vec3x4) -> DVec3x4 {
     DVec3x4::from_homogeneous_vector(out)
 }
 
-/// Arguments:
-/// - dir: normalized, either direction
-/// - norm: normalized, away from surface
-/// - eta: object ior / medium ior
-/// Returns:
-/// - dir_dot_norm: fresnel cosine term
-/// - odir: normalized
-pub fn refracted(dir: Vec3, mut norm: Vec3, mut eta: f32) -> (f32, Vec3) {
-    let ondi = norm.dot(dir);
-
-    let ndi = if ondi > 0. {
-        norm = -norm;
-        -ondi
-    } else {
-        eta = eta.recip();
-        ondi
-    };
-
-    let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
-    if k < 0.0 {
-        (ondi, const { Vec3::broadcast(f32::NAN) })
-    } else {
-        (ondi, dir * eta - (eta * ndi + k.sqrt()) * norm)
+#[inline]
+#[allow(non_snake_case)]
+pub fn Mat4x4_splat(mat4: &Mat4) -> Mat4x4 {
+    Mat4x4 {
+        cols: mat4.cols.map(|c| c.into()),
     }
 }
 
-/// Arguments:
-/// - dir: normalized, either direction
-/// - norm: normalized, away from surface
-/// - eta: object ior / medium ior
-/// Returns:
-/// - dir_dot_norm: fresnel cosine term
-/// - odir: normalized
-pub fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4) -> (f32x4, Vec3x4) {
-    let ondi = norm.dot(dir);
-
-    let flip = ondi.cmp_gt(f32x4::ZERO);
-    let ndi = flip.blend(-ondi, ondi);
-    let norm = Vec3x4::blend(flip, -norm, norm);
-    let eta = flip.blend(eta, eta.recip());
-
-    let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
-    let tir = k.cmp_lt(f32x4::ZERO);
-    let out = dir.mul_add(Vec3x4::broadcast(eta), -(eta * ndi + k.sqrt()) * norm);
-    (
-        ondi,
-        Vec3x4::blend(tir, const { Vec3x4::broadcast(f32x4_NAN) }, out),
-    )
+#[inline]
+pub fn cast_u32x4(a: f32x4) -> u32x4 {
+    bytemuck::cast(a.fast_trunc_int())
 }
 
 #[inline]
@@ -226,21 +172,30 @@ impl<T, U> Accum4<T, U> {
             unsafe { core::mem::transmute_copy(&twos) },
         )
     }
+
+    pub fn peek(&self) -> Option<(u32, T, U)> {
+        if self.n == 0 {
+            None
+        } else {
+            Some((
+                self.idxs[self.n - 1],
+                unsafe { self.ones[self.n - 1].assume_init_read() },
+                unsafe { self.twos[self.n - 1].assume_init_read() },
+            ))
+        }
+    }
 }
 
-impl<T: Copy, U: Clone> Accum4<T, U> {
-    /// Flush: pad remaining slots by repeating the last value,
-    /// then return the accumulated arrays. Resets the counter.
-    pub fn flush(mut self, pad_one: T) -> Option<([u32; 4], [T; 4], [U; 4])> {
+impl<T: Copy, U: bytemuck::Zeroable> Accum4<T, U> {
+    pub fn flush(&mut self, pad_one: T) -> Option<([u32; 4], [T; 4], [U; 4])> {
         if self.n == 0 {
             return None;
         }
         for empty in &mut self.ones[self.n..4] {
             empty.write(pad_one);
         }
-        let last = self.twos[self.n - 1].as_ptr();
         for empty in &mut self.twos[self.n..4] {
-            empty.write(unsafe { (*last).clone() });
+            empty.write(U::zeroed());
         }
         self.n = 0;
 

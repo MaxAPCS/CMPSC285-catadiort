@@ -1,8 +1,7 @@
 use ultraviolet::Vec3;
 
-use crate::engine::ray::ShadowRay;
-
 use super::Light;
+use super::ray::ShadowRay;
 
 pub(crate) struct SpotLight {
     pos: Vec3,
@@ -43,11 +42,7 @@ impl Light for SpotLight {
             pos: self.pos,
             dir,
             max_t: dst,
-            irradiance: if cone * reach == 0. {
-                None
-            } else {
-                Some(self.intensity * cone * reach / dst_sq)
-            },
+            irradiance: self.intensity * cone * reach / dst_sq,
         }
     }
 }

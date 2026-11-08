@@ -1,25 +1,21 @@
-use ultraviolet::Rotor3;
-use ultraviolet::Rotor3x4;
-use ultraviolet::Vec3;
-use ultraviolet::Vec3x4;
-use ultraviolet::Vec4;
-use ultraviolet::Vec4x4;
+use ultraviolet::{Rotor3, Rotor3x4, Vec3, Vec3x4, Vec4, Vec4x4};
 use wide::f32x4;
-
-use crate::engine::Light;
-use crate::utils::texture;
 
 use super::object;
 use super::ray;
+use super::{Light, Material};
+use crate::utils::texture;
 
 pub const MEDIUM_IOR: f32 = 1.0;
 
 pub(crate) struct World {
     pub spheres: Vec<object::Sphere>,
-    // pub meshes: Vec<object::Mesh>,
+    pub meshes: Vec<object::Mesh>,
     pub pointlights: Vec<object::PointLight>,
     pub directionallights: Vec<object::DirectionalLight>,
     pub spotlights: Vec<object::SpotLight>,
+
+    pub materials: smallvec::SmallVec<[Material; 4]>,
 
     pub ambientcolor: Vec3,
 
@@ -34,9 +30,17 @@ impl World {
     pub const fn empty() -> Self {
         Self {
             spheres: Vec::new(),
+            meshes: Vec::new(),
             pointlights: Vec::new(),
             directionallights: Vec::new(),
             spotlights: Vec::new(),
+
+            materials: unsafe {
+                smallvec::SmallVec::from_const_with_len_unchecked(
+                    [const { Material::default() }; 4],
+                    1,
+                )
+            },
 
             ambientcolor: Vec3::broadcast(0.),
 
@@ -52,20 +56,23 @@ impl World {
         // pass
     }
 
-    #[inline]
-    pub fn clear(&mut self) {
-        *self = Self::empty();
-    }
-
-    pub(super) fn intersect<'a>(self: &'a Self, rays: &mut ray::Rayx4<'a>, depth: u16) {
+    pub(super) fn intersect<'a>(self: &'a Self, rays: &mut ray::Rayx4, depth: u16) {
         for s in &self.spheres {
             rays.intersect(s, depth)
+        }
+        for m in &self.meshes {
+            rays.intersect(m, depth);
         }
     }
 
     pub(super) fn shadow<'a>(self: &'a Self, rays: &mut ray::ShadowRay, depth: u16) {
         for s in &self.spheres {
             if rays.intersect(s, depth) {
+                return;
+            }
+        }
+        for m in &self.meshes {
+            if rays.intersect(m, depth) {
                 return;
             }
         }
@@ -82,6 +89,9 @@ impl World {
     }
 
     pub(super) fn sample_environment(&self, dir: Vec3) -> Vec3 {
+        if dir.x.is_nan() {
+            return Vec3::zero();
+        }
         if self.environmenttex < 0 {
             return self.environmentcolor;
         }
@@ -92,6 +102,9 @@ impl World {
     }
 
     pub(super) fn sample_environmentx4(&self, dir: Vec3x4) -> Vec3x4 {
+        if dir.x.is_nan().all() {
+            return Vec3x4::zero();
+        }
         if self.environmenttex < 0 {
             return Vec3x4::splat(self.environmentcolor);
         }
@@ -102,7 +115,11 @@ impl World {
         let tex: [Vec4; 4] =
             core::array::from_fn(|i| texture::lookup_lat_long(self.environmenttex, u[i], v[i]));
         let tex: Vec4x4 = tex.into();
-        Vec3x4::from_homogeneous_point(tex * f32x4::splat(self.environmentscale))
+        Vec3x4::blend(
+            dir.x.is_nan(),
+            Vec3x4::zero(),
+            Vec3x4::from_homogeneous_point(tex * f32x4::splat(self.environmentscale)),
+        )
     }
 }
 

@@ -1,51 +1,71 @@
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use ultraviolet::{Vec3, Vec3x4};
-use wide::{CmpLe, f32x4};
+use wide::{CmpGt, f32x4};
 
-use crate::utils::texture;
-
-use super::object::{Primitive, Sphere};
-use super::ray::{RayHit, Rayx4};
-use super::util;
+use super::ray;
+use super::wider;
 use super::world;
 use super::{RECAST_EPSILON, RECAST_EPSILON_X4};
+#[cfg(debug_assertions)]
+use crate::rt_trace;
+use crate::utils::debug::vec3_display;
 
-type RayBuf<'a> = Vec<([u32; 4], Vec3x4, Rayx4<'a>)>;
-pub(crate) struct Screen<'a> {
+type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
+pub(crate) struct Screen {
     frame: Box<[Vec3]>,
 
-    raysone: RayBuf<'a>,
-    raystwo: RayBuf<'a>,
+    #[cfg(debug_assertions)]
+    width: u32,
+
+    raysone: RayBuf,
+    raystwo: RayBuf,
 }
 
-impl<'a> Screen<'a> {
+impl Screen {
     /// Arguments:
+    /// - eyepos: camera position
     /// - fwd: ray into screen, normalized
     /// - up: ray to screen top, normalized, perpendicular to fwd
-    /// - fov: vertical field of angle, radians
+    /// - fov: vertical field of view, radians
     pub fn create(eyepos: Vec3, fwd: Vec3, up: Vec3, fov: f32, screen: (u32, u32)) -> Self {
         debug_assert!(screen.0 * screen.1 % 4 == 0);
         let (w, h) = (screen.0 as f32, screen.1 as f32);
         let halfheight = (fov / 2.).tan();
         let tofwd = Vec3x4::splat(fwd);
         let totop = Vec3x4::splat(halfheight * up);
-        let tolft = Vec3x4::splat(halfheight * (w / h) * Vec3::cross(&fwd, up));
+        let torgh = Vec3x4::splat(halfheight * (w / h) * Vec3::cross(&fwd, up));
         Self {
             frame: vec![Vec3::zero(); (screen.0 * screen.1) as usize].into_boxed_slice(),
-            raysone: util::Chunku32x4::from(
+            #[cfg(debug_assertions)]
+            width: screen.0,
+            raysone: wider::Chunku32x4::from(
                 (0..screen.1).flat_map(|j| (0..screen.0).map(move |i| (i, j))),
             )
             .map(|(i, j)| {
-                let x: f32x4 = (util::cast_f32x4(i) + 0.5) / w;
-                let y: f32x4 = (util::cast_f32x4(j) + 0.5) / h;
-
+                let x: f32x4 = (wider::cast_f32x4(i) + 0.5) / w;
+                let y: f32x4 = (wider::cast_f32x4(j) + 0.5) / h;
+                let dir = (tofwd + (2. * x - 1.) * torgh + (1. - 2. * y) * totop).normalized();
+                #[cfg(debug_assertions)]
+                {
+                    let i = i.as_array_ref();
+                    let j = j.as_array_ref();
+                    let dir: [Vec3; 4] = dir.into();
+                    for n in 0..4 {
+                        rt_trace!(
+                            i[n],
+                            j[n],
+                            "pixel ({}, {}): camera ray o=({}) d=({})",
+                            i[n],
+                            j[n],
+                            vec3_display(eyepos),
+                            vec3_display(dir[n])
+                        );
+                    }
+                }
                 (
                     (j * screen.0 + i).into(),
                     Vec3x4::one(),
-                    Rayx4::new(
-                        Vec3x4::splat(eyepos),
-                        tofwd + (2. * x - 1.) * tolft + (1. - 2. * y) * totop,
-                    ),
+                    ray::Rayx4::new(Vec3x4::splat(eyepos), dir),
                 )
             })
             .collect(),
@@ -53,17 +73,29 @@ impl<'a> Screen<'a> {
         }
     }
 
-    /// Run 2*floor(max_depth/2) passes
-    pub fn process(&mut self, world: &'a world::World, max_depth: u16) {
-        for depth in 0..max_depth / 2 {
+    pub fn process(&mut self, world: &world::World, max_depth: u16) {
+        #[cfg(any(
+            feature = "aovraydir",
+            feature = "aovdepth",
+            feature = "aovnormal",
+            feature = "aovalbedo"
+        ))]
+        {
+            self._aov(world);
+            return;
+        }
+        for depth in (0..=max_depth).step_by(2) {
             Self::_pass(
                 &mut self.frame,
                 &mut self.raysone,
                 &mut self.raystwo,
                 world,
-                2 * depth,
+                depth,
+                depth == max_depth,
+                #[cfg(debug_assertions)]
+                self.width,
             );
-            if self.raystwo.is_empty() {
+            if self.raystwo.is_empty() || depth == max_depth {
                 break;
             }
             Self::_pass(
@@ -71,7 +103,10 @@ impl<'a> Screen<'a> {
                 &mut self.raystwo,
                 &mut self.raysone,
                 world,
-                2 * depth + 1,
+                depth + 1,
+                depth + 1 == max_depth,
+                #[cfg(debug_assertions)]
+                self.width,
             );
             if self.raysone.is_empty() {
                 break;
@@ -85,213 +120,273 @@ impl<'a> Screen<'a> {
 
     fn _pass(
         frame: &mut Box<[Vec3]>,
-        src: &mut RayBuf<'a>,
+        src: &mut RayBuf,
         dst: &mut RayBuf,
-        world: &'a world::World,
+        world: &world::World,
         depth: u16,
+        last_pass: bool,
+        #[cfg(debug_assertions)] width: u32,
     ) {
-        debug_assert!(dst.is_empty());
+        debug_assert!(!src.is_empty() && dst.is_empty());
 
-        src.par_iter_mut()
-            .filter_map(|(idxs, weights, rays)| {
-                world.intersect(rays, depth);
-                rays.collapse();
-                let Some(hits) = rays.get() else {
-                    return Some((*idxs, world.sample_environmentx4(rays.dir).into()));
-                };
-                let weights: [Vec3; 4] = (*weights).into();
-                let nclr: [Vec3; 4] = core::array::from_fn(|i| {
-                    if weights[i].component_max() <= 0. {
-                        return Vec3::zero();
-                    }
-                    if hits[i].t.is_nan() {
-                        return world.sample_environment(hits[i].dir);
-                    }
-                    let (wnorm, mat) = hits[i].shade(depth);
-                    #[cfg(feature = "aovnormal")]
-                    {
-                        return 0.5 * wnorm + Vec3::broadcast(0.5);
-                    }
-                    #[cfg(feature = "aovalbedo")]
-                    {
-                        return mat.albedo;
-                    }
-                    #[cfg(feature = "aovdepth")]
-                    {
-                        return if hits[i].t > 0.0 {
-                            Vec3::broadcast(hits[i].t.recip())
-                        } else {
-                            Vec3::zero()
-                        };
-                    }
-                    let shadowrays: Vec<_> = world
-                        .shadowrays(hits[i].pos + wnorm * RECAST_EPSILON)
-                        .filter_map(|mut sr| {
-                            if sr.dir.dot(wnorm) <= 0. {
-                                return None;
-                            }
-                            world.shadow(&mut sr, depth);
-                            Some(sr)
-                        })
-                        .collect();
-                    weights[i]
-                        * mat.color(
-                            shadowrays.as_slice(),
-                            wnorm,
-                            hits[i].dir,
-                            true,
-                            world.ambientcolor,
-                        )
-                });
-                Some((*idxs, nclr))
-            })
-            .collect::<Box<_>>()
-            .into_iter()
-            .for_each(|(idxs, contribs)| {
+        // Process Source Intersections
+        src.par_iter_mut().for_each(|(_, _, rays)| {
+            world.intersect(rays, depth);
+            rays.collapse();
+        });
+
+        // Process Source Misses
+        let srchits_est = src.len() * 3 / 4;
+        let mut srchits = Vec::with_capacity(srchits_est);
+        src.into_iter().for_each(|(idxs, wghs, rays)| {
+            let wghs: [Vec3; 4] = (*wghs).into();
+            let Some(hit) = rays.get() else {
+                let env: [Vec3; 4] = world.sample_environmentx4(rays.dir).into();
                 for i in 0..4 {
-                    frame[idxs[i] as usize] += contribs[i]
+                    frame[idxs[i] as usize] += wghs[i] * env[i];
                 }
-            });
+                return;
+            };
+            let hits: [ray::Hit; 4] = hit.into();
+            for (i, hit) in hits.into_iter().enumerate() {
+                if wghs[i].component_max() <= 0.0 {
+                    continue;
+                }
+                if hit.t.is_nan() {
+                    frame[idxs[i] as usize] += wghs[i] * world.sample_environment(hit.wdir);
+                    continue;
+                }
+                #[cfg(debug_assertions)]
+                {
+                    rt_trace!(
+                        idxs[i] / width,
+                        idxs[i] % width,
+                        "depth {}: hit prim p t={} P=({}) N=({}) Ng=({}) {}",
+                        depth,
+                        hit.t,
+                        vec3_display(hit.wpos),
+                        vec3_display(hit.norm),
+                        vec3_display(hit.wnorm),
+                        if hit.wnorm.dot(hit.wdir) < 0. {
+                            "entering"
+                        } else {
+                            "leaving"
+                        }
+                    );
+                }
+                srchits.push((idxs[i], wghs[i], hit));
+            }
+        });
+        srchits.sort_unstable_by_key(|l| l.2.material);
 
-        let dst_est = src.len() * 3 / 4;
-        dst.reserve((dst_est).saturating_sub(dst.capacity()));
-
-        let mut reflect = util::Accum4::new();
-        let mut refract = util::Accum4::new();
-        for (_, (idxs, weights, rays)) in src.iter().enumerate() {
-            let Some(rhits) = rays.get() else { continue };
-            let weights: [Vec3; 4] = (*weights).into();
-            for (k, rhit) in rhits.into_iter().enumerate() {
-                let obj = rhit.obj;
-                if obj.refracts() && refract.push(idxs[k], weights[k], rhit.clone()) {
-                    Self::_dorefractions(refract.pop(), dst);
+        // Group Source Hits
+        let srchitx4s_est = srchits.len() * 3 / 10;
+        let mut srchitx4s: Vec<([u32; 4], Vec3x4, ray::Hitx4)> = Vec::with_capacity(srchitx4s_est);
+        {
+            let mut group: wider::Accum4<Vec3, ray::Hit> = wider::Accum4::new();
+            for (idx, wgh, hit) in srchits {
+                if let Some(peek) = group.peek()
+                    && peek.2.material != hit.material
+                {
+                    let flush = unsafe { group.flush(Vec3::zero()).unwrap_unchecked() };
+                    srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
                 }
-                if obj.reflects() && reflect.push(idxs[k], weights[k], rhit) {
-                    Self::_doreflections(reflect.pop(), dst);
-                }
+                if group.push(idx, wgh, hit) {
+                    let flush = group.pop();
+                    srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
+                };
+            }
+            if let Some(flush) = group.flush(Vec3::zero()) {
+                srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
             }
         }
-        if let Some(reflect) = reflect.flush(Vec3::zero()) {
-            Self::_doreflections(reflect, dst);
+
+        // Shade Source Hits
+        srchitx4s.par_iter_mut().for_each(|(idxs, wghs, hits)| {
+            // debug_assert_eq!(
+            //     hits.material,
+            //     wide::u32x4::splat(hits.material.as_array_ref()[0])
+            // ); this assertion will not pass because the last material is zeroed after a flush
+            let material = &world.materials[hits.material.as_array_ref()[0] as usize];
+
+            let (norm, matrs) = hits.shade(material, depth);
+
+            let mut contribs = [Vec3::zero(); 4];
+            let wnorm: [Vec3; 4] = hits.wnorm.into();
+            let wpos: [Vec3; 4] = hits.wpos.into();
+            let wdir: [Vec3; 4] = hits.wdir.into();
+            let norma: [Vec3; 4] = norm.into();
+            let wghsa: [Vec3; 4] = (*wghs).into();
+
+            for i in 0..4 {
+                if wghsa[i].component_max() <= 0.0 {
+                    continue;
+                }
+                let shadowrays: Vec<_> = world
+                    .shadowrays(wpos[i] + wnorm[i] * RECAST_EPSILON)
+                    .filter_map(|mut sr| {
+                        if sr.dir.dot(wnorm[i]) <= 0.0 {
+                            #[cfg(debug_assertions)]
+                            {
+                                rt_trace!(
+                                    idxs[i] / width,
+                                    idxs[i] % width,
+                                    "light i: behind the surface (or: N . L <= 0, out of reach)"
+                                )
+                            }
+                            return None;
+                        }
+                        world.shadow(&mut sr, depth);
+                        Some(sr)
+                    })
+                    .collect();
+                contribs[i] =
+                    matrs[i].color(shadowrays.as_slice(), norma[i], wdir[i], world.ambientcolor);
+                if wnorm[i].dot(wdir[i]) < 0. {
+                    contribs[i] += material.emission
+                }
+            }
+            hits.norm = norm; // write back shader norms
+            let contribs: Vec3x4 = contribs.into();
+            hits.color = contribs * *wghs; // write contribs into hit colors
+        });
+
+        // Write Source Colors
+        srchitx4s.iter().for_each(
+            |&(
+                idxs,
+                _,
+                ray::Hitx4 {
+                    color: contribs, ..
+                },
+            )| {
+                let contribs: [Vec3; 4] = contribs.into();
+                for i in 0..4 {
+                    frame[idxs[i] as usize] += contribs[i];
+                }
+            },
+        );
+
+        if last_pass {
+            return;
         }
-        if let Some(refract) = refract.flush(Vec3::zero()) {
-            Self::_dorefractions(refract, dst);
-        }
+
+        *dst = srchitx4s
+            .into_par_iter()
+            .flat_map_iter(|(idxs, wghs, hits)| {
+                let material = &world.materials[hits.material.as_array_ref()[0] as usize];
+                let mut children = smallvec::SmallVec::<[_; 3]>::new();
+                if material.reflects() {
+                    let nwgh = Vec3x4::splat(material.specular * material.smoothness());
+                    let twgh = wghs * nwgh;
+
+                    if twgh.component_max().cmp_gt(f32x4::ZERO).any() {
+                        let reflectdir = hits.reflect();
+                        children.push((
+                            idxs,
+                            twgh,
+                            ray::Rayx4::new(
+                                hits.wpos
+                                    + Vec3x4::blend(
+                                        hits.wnorm.dot(reflectdir).cmp_gt(f32x4::ZERO),
+                                        hits.wnorm,
+                                        -hits.wnorm,
+                                    ) * RECAST_EPSILON_X4,
+                                reflectdir,
+                            ),
+                        ))
+                    }
+                }
+                if material.refracts() {
+                    let (ndi, refractdir) = hits.refract(material);
+                    let reflectwgh =
+                        f32x4::blend(refractdir.x.is_nan(), f32x4::ONE, material.fresnelx4(ndi));
+                    let reflectdir = hits.reflect();
+
+                    children.push((
+                        idxs,
+                        wghs * Vec3x4::splat(material.specular) * reflectwgh,
+                        ray::Rayx4::new(
+                            hits.wpos
+                                + Vec3x4::blend(
+                                    hits.wnorm.dot(reflectdir).cmp_gt(f32x4::ZERO),
+                                    hits.wnorm,
+                                    -hits.wnorm,
+                                ) * RECAST_EPSILON_X4,
+                            reflectdir,
+                        ),
+                    ));
+
+                    if !refractdir.x.is_nan().all() {
+                        children.push((
+                            idxs,
+                            wghs * Vec3x4::broadcast(
+                                material.transmission * (f32x4::ONE - reflectwgh),
+                            ),
+                            ray::Rayx4::new(
+                                hits.wpos
+                                    + Vec3x4::blend(
+                                        hits.wnorm.dot(refractdir).cmp_gt(f32x4::ZERO),
+                                        hits.wnorm,
+                                        -hits.wnorm,
+                                    ) * RECAST_EPSILON_X4,
+                                refractdir,
+                            ),
+                        ));
+                    }
+                }
+                children
+            })
+            .collect();
 
         #[cfg(debug_assertions)]
-        println!(
-            "screen: pass count estimate {}, actual {}",
-            dst_est,
-            dst.len()
-        );
-        dst.shrink_to_fit();
+        println!("screen: pass count src {} dst {}", src.len(), dst.len());
         src.clear();
+        dst.shrink_to_fit();
     }
 
-    fn _doreflections(
-        (idxs, owgh, hits): ([u32; 4], [Vec3; 4], [RayHit<Sphere>; 4]),
-        dst: &mut RayBuf,
-    ) {
-        let owgh: Vec3x4 = owgh.into();
-        let mut npos = [Vec3::zero(); 4];
-        let mut odir = [Vec3::zero(); 4];
-        let mut nwgh = [Vec3::zero(); 4];
-
-        let mut sameobj = true;
-        for (i, hit) in hits.iter().enumerate() {
-            npos[i] = hit.pos;
-            odir[i] = hit.dir;
-            nwgh[i] = hit.obj.material.specular * hit.obj.material.smoothness();
-            sameobj &= core::ptr::eq(hit.obj, hits[0].obj);
-        }
-
-        let npos = npos.into();
-        let nwgh: Vec3x4 = nwgh.into();
-        let reflectdir = if sameobj {
-            hits[0].obj.reflectx4(npos, odir.into())
-        } else {
-            let mut reflectdir = [Vec3::zero(); 4];
-            for (i, h) in hits.iter().enumerate() {
-                reflectdir[i] = h.obj.reflect(h.pos, h.dir);
+    fn _aov(&mut self, world: &world::World) {
+        self.raysone.par_iter_mut().for_each(|(_, _, rays)| {
+            world.intersect(rays, 0);
+            rays.collapse();
+        });
+        self.raysone.iter_mut().for_each(|(idxs, _, rays)| {
+            let mut out = [Vec3::zero(); 4];
+            #[cfg(feature = "aovraydir")]
+            {
+                out = (f32x4::HALF * rays.dir + Vec3x4::broadcast(f32x4::HALF)).into();
             }
-            reflectdir.into()
-        };
-
-        let twgh = owgh * nwgh;
-        if twgh.component_max().cmp_le(f32x4::ZERO).all() {
-            return;
-        }
-
-        dst.push((
-            idxs,
-            twgh,
-            Rayx4::new(
-                npos + reflectdir.normalized() * RECAST_EPSILON_X4,
-                reflectdir,
-            ),
-        ));
-    }
-
-    fn _dorefractions(
-        (idxs, owgh, hits): ([u32; 4], [Vec3; 4], [RayHit<Sphere>; 4]),
-        dst: &mut RayBuf,
-    ) {
-        let owgh: Vec3x4 = owgh.into();
-        let mut npos = [Vec3::zero(); 4];
-        let mut odir = [Vec3::zero(); 4];
-
-        let mut sameobj = true;
-        for (i, hit) in hits.iter().enumerate() {
-            npos[i] = hit.pos;
-            odir[i] = hit.dir;
-            sameobj &= core::ptr::eq(hit.obj, hits[0].obj);
-        }
-
-        let npos = npos.into();
-
-        let mut reflectwgh = [Vec3::zero(); 4];
-        let mut refractdir = [Vec3::zero(); 4];
-        let mut reflectdir = [Vec3::zero(); 4];
-        if sameobj {
-            let odir = odir.into();
-            let obj = hits[0].obj;
-            let (ndi, dir) = obj.refractx4(npos, odir);
-            reflectwgh = Vec3x4::blend(
-                dir.x.is_nan(),
-                Vec3x4::zero(),
-                Vec3x4::splat(obj.material.specular) * obj.material.fresnelx4(ndi),
-            )
-            .into();
-            refractdir = dir.into();
-            reflectdir = obj.reflectx4(npos, odir.into()).into();
-        } else {
-            for (i, h) in hits.iter().enumerate() {
-                let (ndi, dir) = h.obj.refract(h.pos, h.dir);
-                reflectwgh[i] = if dir.x.is_nan() {
-                    Vec3::zero()
-                } else {
-                    h.obj.material.specular * h.obj.material.fresnel(ndi)
-                };
-                refractdir[i] = dir;
-                reflectdir[i] = h.obj.reflect(h.pos, h.dir);
+            #[cfg(feature = "aovdepth")]
+            {
+                if let Some(hits) = rays.get() {
+                    out = Vec3x4::broadcast(hits.t.cmp_gt(0.).blend(hits.t.recip(), f32x4::ZERO))
+                        .into();
+                }
             }
-        };
-        let reflectwgh = reflectwgh.into();
-        let refractdir: Vec3x4 = refractdir.into();
-        let reflectdir = reflectdir.into();
-
-        dst.push((
-            idxs,
-            owgh * reflectwgh,
-            Rayx4::new(npos + reflectdir * RECAST_EPSILON_X4, reflectdir),
-        ));
-        if refractdir.x.is_nan().all() {
-            return;
-        }
-        dst.push((
-            idxs,
-            owgh * (Vec3x4::one() - reflectwgh),
-            Rayx4::new(npos - refractdir * RECAST_EPSILON_X4, refractdir),
-        ));
+            #[cfg(feature = "aovnormal")]
+            {
+                if let Some(hits) = rays.get() {
+                    out = (f32x4::HALF * hits.norm + Vec3x4::broadcast(f32x4::HALF)).into();
+                }
+            }
+            #[cfg(feature = "aovalbedo")]
+            {
+                if let Some(hits) = rays.get() {
+                    let material = hits.material.as_array_ref();
+                    let color: [Vec3; 4] = hits.color.into();
+                    for i in 0..4 {
+                        if color[i].x.is_nan() {
+                            out[i] = (world.materials[material[i] as usize]).albedo.into();
+                        } else {
+                            out[i] = color[i];
+                        }
+                    }
+                }
+            }
+            for i in 0..4 {
+                self.frame[idxs[i] as usize] = out[i];
+            }
+        });
+        self.raysone.clear();
     }
 }

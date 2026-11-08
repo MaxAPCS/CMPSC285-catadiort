@@ -1,12 +1,14 @@
 use ultraviolet::Vec3;
 
-use crate::engine::{Sphere, ray::ShadowRay, util};
-
 use super::Light;
+use super::{Sphere, ray::ShadowRay};
+use crate::api::RtMaterial;
 
 pub(crate) struct PointLight {
     pos: Vec3,
     intensity: Vec3,
+
+    radius: f32,
 }
 
 impl Light for PointLight {
@@ -17,33 +19,33 @@ impl Light for PointLight {
         ShadowRay {
             pos,
             dir: dir / dst,
-            max_t: dst,
-            irradiance: Some(self.intensity / dst_sq),
+            max_t: dst - self.radius,
+            irradiance: self.intensity / dst_sq,
         }
     }
 }
 
 impl PointLight {
     pub const fn new(pos: Vec3, intensity: Vec3) -> Self {
-        Self { pos, intensity }
+        Self {
+            pos,
+            intensity,
+            radius: 0.,
+        }
     }
 
-    pub fn from_emissive(o: &Sphere) -> Option<Self> {
-        if o.material.emission == Vec3::zero() {
+    pub fn from_emissive(o: &Sphere, material: &RtMaterial) -> Option<Self> {
+        if material.emission == Vec3::zero() {
             return None;
         }
 
-        let intensity = util::extract_scale_sq(&o.owtrans)
-            .as_array()
-            .iter()
-            .sum::<f32>()
-            / 9.
-            * core::f32::consts::PI
-            * o.material.emission;
+        let scale_sq = o.extract_avg_scale_sq();
+        let intensity = scale_sq * core::f32::consts::PI * material.emission;
 
         Some(Self {
-            pos: o.owtrans.extract_translation(),
+            pos: o.extract_translation(),
             intensity,
+            radius: scale_sq.sqrt(),
         })
     }
 }

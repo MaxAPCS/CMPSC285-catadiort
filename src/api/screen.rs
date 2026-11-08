@@ -22,18 +22,18 @@ use crate::utils::timer::{RenderBudget, Timer};
 /// textures, the BVH.
 pub struct ScreenState {
     pub display: String, /* rtDisplay's name, without extension */
-    pub res: (u32, u32),
+    pub res: (u16, u16),
     pub samples: u32,
 
     pub max_depth: u16,
-    pub ambient: [f32; 3],
-    pub background: [f32; 3],
+    pub ambient: RtColor,
+    pub background: RtColor,
     pub environment: i32, /* rtEnvironment's map, a texture handle (-1: none, the background shows) */
     pub environment_scale: f32,
     pub environment_rotate_y: f32,
-    pub eye: Vec3,
-    pub lookat: Vec3,
-    pub up: Vec3,
+    pub eye: RtVector,
+    pub lookat: RtVector,
+    pub up: RtVector,
     pub fovy: f32,
     pub tonemap: String, /* rtTonemap: the PNG's tone map and exposure (stops) */
     pub exposure: f32,
@@ -55,8 +55,8 @@ impl ScreenState {
             res: (640, 480),
             samples: 1,
             max_depth: 8,
-            ambient: [0.0; 3],
-            background: [0.0; 3],
+            ambient: Vec3::broadcast(0.),
+            background: Vec3::broadcast(0.),
             environment: -1,
             environment_scale: 1.0,
             environment_rotate_y: 0.0,
@@ -201,7 +201,7 @@ pub unsafe extern "C" fn rtAmbient(ka: &RtVector) {
 /// # Safety
 /// `radiance` points at three floats.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rtBackground(radiance: &[f32; 3]) {
+pub unsafe extern "C" fn rtBackground(radiance: &RtColor) {
     state().background = *radiance;
 }
 
@@ -215,9 +215,12 @@ pub unsafe extern "C" fn rtBackground(radiance: &[f32; 3]) {
 /// `file` is null or a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rtEnvironment(file: *const c_char, scale: RtFloat, rotate_y: RtFloat) {
-    let _ = text(file);
     let mut s = state();
-    s.environment = -1; /* TODO (step 13): if the file is given, rtMakeTexture(file, 1), else -1 */
+    s.environment = if file.is_null() {
+        -1
+    } else {
+        unsafe { rtMakeTexture(file, 1) }
+    };
     s.environment_scale = scale;
     s.environment_rotate_y = rotate_y;
 }
@@ -382,12 +385,21 @@ pub extern "C" fn rtWorldEnd() {
     }
 
     let mut s = state();
-    if o.max_depth != -1 {
-        s.max_depth = o.max_depth as _;
-    }
+    s.max_depth = o.max_depth as _; // if max_depth is -1, it wraps back to u16::MAX, which is correct.
     if let Some(ambient) = o.ambient {
-        s.ambient = ambient;
+        s.ambient = ambient.into();
     }
+    if let Some(width) = o.width {
+        s.res.0 = width.into();
+    }
+    if let Some(height) = o.height {
+        s.res.1 = height.into();
+    }
+    if let Some(spp) = o.spp {
+        let spp: u16 = spp.into();
+        s.samples = spp as _;
+    }
+    let pixels = s.res.0 as u64 * s.res.1 as u64;
 
     let total = Timer::new();
     let (build_time, render, mut budget, rgb) = {
@@ -403,7 +415,13 @@ pub extern "C" fn rtWorldEnd() {
 
         let fwd = (s.lookat - s.eye).normalized();
         let up = fwd.cross(s.up).cross(fwd).normalized();
-        let mut screen = Screen::create(s.eye, fwd, up, s.fovy.to_radians(), s.res);
+        let mut screen = Screen::create(
+            s.eye,
+            fwd,
+            up,
+            s.fovy.to_radians(),
+            (s.res.0 as _, s.res.1 as _),
+        );
 
         world.finish();
 
@@ -417,9 +435,9 @@ pub extern "C" fn rtWorldEnd() {
         (build_time, render, budget, screen.write())
     };
     if o.progress {
-        budget.progress((s.res.0 * s.res.1) as _); /* --progress: a line every two seconds */
+        budget.progress(pixels); /* --progress: a line every two seconds */
     }
-    budget.done((s.res.0 * s.res.1) as _);
+    budget.done(pixels);
     budget.finish();
     let render_time = render.seconds();
 
@@ -455,7 +473,7 @@ pub extern "C" fn rtWorldEnd() {
         &s.display
     } else {
         &o.scene
-    }; /* the simple main sets none */
+    };
     println!(
         "TIME {} build={:.3} render={:.3} total={:.3} threads={}",
         scene_name,
@@ -464,12 +482,7 @@ pub extern "C" fn rtWorldEnd() {
         total.seconds(),
         thread_count(&o)
     );
-    budget.report(
-        scene_name,
-        render_time,
-        (s.res.0 * s.res.1) as _,
-        s.samples as _,
-    );
+    budget.report(scene_name, render_time, pixels, s.samples as _);
 
     world::clear();
 }

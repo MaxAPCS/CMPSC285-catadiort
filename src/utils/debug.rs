@@ -4,15 +4,6 @@
 //! at a hit into the --aov images, so every renderer writes the same
 //! pictures.
 
-use std::cell::Cell;
-
-use ultraviolet::Vec3;
-
-thread_local! {
-    /// This thread is on the traced pixel.
-    static TRACE_ON: Cell<bool> = const { Cell::new(false) };
-}
-
 /// --trace X Y: the pixel loop calls trace_begin(px, py) before a pixel's
 /// samples and trace_end() after them; in between, rt_trace!(...) prints
 /// one line on stderr (println's format) when that pixel is the traced
@@ -22,27 +13,19 @@ thread_local! {
 /// the traced pixel prints, so lines never interleave, and on every other
 /// pixel an rt_trace! is one test of a thread-local flag, before its
 /// arguments are even evaluated: free in the render loop.
-pub fn trace_begin(px: i32, py: i32) {
-    let o = crate::options::OPTIONS.read().expect("options");
-    TRACE_ON.with(|t| t.set(o.trace_x >= 0 && px == o.trace_x && py == o.trace_y));
-}
-
-pub fn trace_end() {
-    TRACE_ON.with(|t| t.set(false));
-}
-
-#[inline]
-pub fn tracing() -> bool {
-    TRACE_ON.with(|t| t.get())
-}
-
 #[macro_export]
 macro_rules! rt_trace {
-    ($($arg:tt)*) => {
-        if $crate::debug::tracing() {
+    ($px:expr, $py:expr, $($arg:tt)*) => {
+        let o = crate::options::OPTIONS.read().expect("options");
+        if o.trace_x != u32::MAX && $px == o.trace_x && $py == o.trace_y {
             eprintln!($($arg)*);
         }
     };
+}
+
+#[inline]
+pub fn vec3_display(x: ultraviolet::Vec3) -> String {
+    x.as_array().map(|a| f32::to_string(&a)).join(",")
 }
 
 /* The --aov images, each a color from what the renderer has at the first

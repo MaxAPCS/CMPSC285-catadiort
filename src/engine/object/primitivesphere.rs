@@ -1,41 +1,33 @@
+use bytemuck::Zeroable;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::sync::Arc;
-
 use ultraviolet::{Mat4, Vec3, Vec3x4};
-use wide::CmpGt;
-use wide::{CmpLt, CmpNe, f32x4, f64x4};
+use wide::{CmpGe, CmpGt, CmpLt, CmpNe, f32x4, f64x4};
 
 use super::Primitive;
-use super::shadecontext;
-use crate::api::{RtCutoutFn, RtMaterial, RtShaderFn, WorldState};
-use crate::engine::ray::{Rayx4, ShadowRay};
-use crate::engine::util;
-use crate::engine::world::MEDIUM_IOR;
+use super::ray;
+use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext, WorldState};
+use crate::engine::wider;
 
 #[derive(Clone)]
 pub(crate) struct Sphere {
-    /// World to Object Transform ([Sphere::owtrans] inverse)
+    /// World to Object Transform
     wotrans: Mat4,
-
-    /// Object to World Transform ([Sphere::wotrans] inverse)
-    pub owtrans: Mat4,
 
     /// Cutout Shader Reference
     cutout: RtCutoutFn,
     cutoutparams: Option<Arc<[u8]>>,
 
-    /// Surface Shader Reference
-    shader: RtShaderFn,
-    shaderparams: Option<Arc<[u8]>>,
-
     /// Material Properties
-    pub material: RtMaterial,
+    material: usize,
 }
 
 impl Primitive for Sphere {
     fn bounds(&self) -> (Vec3, Vec3) {
-        let center = self.owtrans.transform_point3(Vec3::zero());
+        let owtrans = self.wotrans.inversed();
+        let center = owtrans.transform_point3(Vec3::zero());
 
-        let m = self.owtrans.as_array();
+        let m = owtrans.as_array();
         let ex = m[0].abs() + m[4].abs() + m[8].abs();
         let ey = m[1].abs() + m[5].abs() + m[9].abs();
         let ez = m[2].abs() + m[6].abs() + m[10].abs();
@@ -44,174 +36,77 @@ impl Primitive for Sphere {
         (center - half, center + half)
     }
 
-    fn reflect(&self, wpos: Vec3, wdir: Vec3) -> Vec3 {
-        let opos = self.wotrans.transform_point3(wpos);
-        let wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
-        wdir.reflected(wnorm)
-    }
-
-    fn reflectx4(&self, wpos: Vec3x4, wdir: Vec3x4) -> Vec3x4 {
-        let opos = util::transform_pointx4(&self.wotrans, &wpos);
-        let wnorm = util::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
-        wdir.reflected(wnorm)
-    }
-
-    #[inline]
-    fn reflects(&self) -> bool {
-        self.material.reflects()
-    }
-
-    fn refract(&self, wpos: Vec3, wdir: Vec3) -> (f32, Vec3) {
-        let opos = self.wotrans.transform_point3(wpos);
-        let wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
-        util::refracted(wdir, wnorm, self.material.ior / MEDIUM_IOR)
-    }
-
-    fn refractx4(&self, wpos: Vec3x4, wdir: Vec3x4) -> (f32x4, Vec3x4) {
-        let opos = util::transform_pointx4(&self.wotrans, &wpos);
-        let wnorm = util::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
-        util::refractedx4(wdir, wnorm, (self.material.ior / MEDIUM_IOR).into())
-    }
-
-    #[inline]
-    fn refracts(&self) -> bool {
-        self.material.refracts()
-    }
-
-    fn shade(&self, wpos: Vec3, wdir: Vec3, time: f32, depth: u16) -> (Vec3, RtMaterial) {
-        let opos = self.wotrans.transform_point3(wpos);
-        let mut wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
-        if wdir.dot(wnorm) > 0. {
-            wnorm = -wnorm;
-        }
-
-        let Some(shader) = self.shader else {
-            return (wnorm, self.material);
-        };
-
-        let mut ctx = shadecontext(
-            wpos,
-            wdir,
-            wnorm,
-            opos,
-            time,
-            Self::uv(opos),
-            depth,
-            self.shaderparams(),
-            self.material,
-        );
-        unsafe { shader(&mut ctx) };
-        (ctx.N.into(), ctx.m)
-    }
-
-    fn shadex4(
+    fn cutout(
         &self,
-        wpos: Vec3x4,
-        wdir: Vec3x4,
-        t: f32x4,
+        wpos: Vec3,
+        wdir: Vec3,
+        t: f32,
+        opos: Vec3,
+        uv: (f32, f32),
         depth: u16,
-    ) -> (Vec3x4, [RtMaterial; 4]) {
-        let opos = util::transform_pointx4(&self.wotrans, &wpos);
-        let mut wnorm = util::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
-        wnorm = Vec3x4::blend(wdir.dot(wnorm).cmp_gt(f32x4::ZERO), -wnorm, wnorm);
-
-        let Some(shader) = self.shader else {
-            return (wnorm, [self.material; 4]);
-        };
-
-        let (u, v) = Self::uvx4(opos);
-        let params = self.shaderparams();
-
-        let wpos: [Vec3; 4] = wpos.into();
-        let wdir: [Vec3; 4] = wdir.into();
-        let wnorm: [Vec3; 4] = wnorm.into();
-        let opos: [Vec3; 4] = opos.into();
-
-        let mut out_wnorm = [Vec3::broadcast(f32::NAN); 4];
-        let mut out_materials = [self.material; 4];
-        for i in 0..4 {
-            let mut ctx = shadecontext(
-                wpos[i],
-                wdir[i],
-                wnorm[i],
-                opos[i],
-                t.to_array()[i],
-                (u.to_array()[i], v.to_array()[i]),
-                depth,
-                params,
-                self.material,
-            );
-            unsafe { shader(&mut ctx) };
-            out_wnorm[i] = ctx.N.into();
-            out_materials[i] = ctx.m
-        }
-        (out_wnorm.into(), out_materials)
-    }
-
-    fn cutout(&self, wpos: Vec3, wdir: Vec3, opos: Vec3, time: f32, depth: u16) -> bool {
+    ) -> bool {
         let Some(cutout) = self.cutout else {
             return true;
         };
+        let wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
 
-        let mut wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
-        if wdir.dot(wnorm) > 0. {
-            wnorm = -wnorm;
-        }
-
-        let mut ctx = shadecontext(
+        let mut ctx = RtShadeContext::new(
+            &self.cutoutparams,
             wpos,
             wdir,
             wnorm,
+            t,
             opos,
-            time,
-            Self::uv(opos),
+            wnorm,
+            uv,
             depth,
-            self.cutoutparams(),
-            self.material,
+            RtMaterial::zeroed(), // todo: grab the actual material
         );
         (unsafe { cutout(&mut ctx) } != 0)
     }
 
-    #[inline]
-    fn cutoutx4(&self, wpos: Vec3x4, wdir: Vec3x4, opos: Vec3x4, t: f32x4, depth: u16) -> f32x4 {
+    fn cutoutx4(
+        &self,
+        wpos: Vec3x4,
+        wdir: Vec3x4,
+        t: f32x4,
+        opos: Vec3x4,
+        uv: (f32x4, f32x4),
+        depth: u16,
+    ) -> f32x4 {
         let Some(cutout) = self.cutout else {
             return f32x4::ONE;
         };
 
-        let mut wnorm = util::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
-        wnorm = Vec3x4::blend(wdir.dot(wnorm).cmp_gt(f32x4::ZERO), -wnorm, wnorm);
-
-        let (u, v) = Self::uvx4(opos);
-        let params = self.cutoutparams();
-
         let wpos: [Vec3; 4] = wpos.into();
         let wdir: [Vec3; 4] = wdir.into();
-        let wnorm: [Vec3; 4] = wnorm.into();
+        let wnorm: [Vec3; 4] = wider::transform_vecx4(&self.wotrans.transposed(), opos)
+            .normalized()
+            .into();
+        let t = t.as_array_ref();
         let opos: [Vec3; 4] = opos.into();
+        let (u, v) = (uv.0.as_array_ref(), uv.1.as_array_ref());
 
-        let x: [_; 4] = core::array::from_fn(|i| {
-            let time = t.to_array()[i];
-            if time.is_nan() {
-                return 0.;
-            }
-            let mut ctx = shadecontext(
+        let mut out = [1.; 4];
+        out.par_iter_mut().enumerate().for_each(|(i, out)| {
+            let mut ctx = RtShadeContext::new(
+                &self.cutoutparams,
                 wpos[i],
                 wdir[i],
                 wnorm[i],
+                t[i],
                 opos[i],
-                time,
-                (u.to_array()[i], v.to_array()[i]),
+                wnorm[i],
+                (u[i], v[i]),
                 depth,
-                params,
-                self.material,
+                RtMaterial::zeroed(), // todo: grab the actual material
             );
-            let cut = unsafe { cutout(&mut ctx) } == 0;
-            if cut { 0. } else { 1. }
+            *out = unsafe { cutout(&mut ctx) } as _
         });
-        x.into()
+        out.into()
     }
 
-    fn shadow(&self, ray: &ShadowRay, max_t: f32, depth: u16) -> bool {
+    fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {
         let ropos = self.wotrans.transform_point3(ray.pos);
         let rodir = self.wotrans.transform_vec3(ray.dir);
 
@@ -226,16 +121,18 @@ impl Primitive for Sphere {
 
         let t1 = (-b - discrim.sqrt()) / a;
 
-        if t1 > max_t {
+        if t1 > ray.max_t {
             return false;
         }
 
+        let opos1 = ropos + rodir * t1;
         if (t1 >= 0.)
             & self.cutout(
                 ray.pos + ray.dir * t1,
                 ray.dir,
-                ropos + rodir * t1,
                 t1,
+                opos1,
+                Self::uv(opos1),
                 depth,
             )
         {
@@ -248,20 +145,22 @@ impl Primitive for Sphere {
 
         let t2 = (-b + discrim.sqrt()) / a;
 
-        (t2 >= 0. && t2 <= max_t)
+        let opos2 = ropos + rodir * t2;
+        (t2 >= 0. && t2 <= ray.max_t)
             & self.cutout(
-                ray.pos + ray.dir * t1,
+                ray.pos + ray.dir * t2,
                 ray.dir,
-                ropos + rodir * t2,
                 t2,
+                opos2,
+                Self::uv(opos2),
                 depth,
             )
     }
 
-    fn intersectx4(&self, rays: &Rayx4, depth: u16) -> f32x4 {
+    fn intersect(&self, rays: &ray::Rayx4, depth: u16) -> Option<ray::Hitx4> {
         // Ray Object-Space Position & Direction
-        let ropos = util::transform_pointx4d(&self.wotrans, &rays.pos);
-        let rodir = util::transform_vecx4d(&self.wotrans, &rays.dir);
+        let ropos = wider::transform_pointx4d(&self.wotrans, &rays.pos);
+        let rodir = wider::transform_vecx4d(&self.wotrans, &rays.dir);
 
         let a = rodir.mag_sq();
         let b = ropos.dot(rodir);
@@ -269,65 +168,82 @@ impl Primitive for Sphere {
         let discrim = b * b - a * c;
 
         if discrim.cmp_lt(f64x4::ZERO).all() {
-            return util::f32x4_NAN;
+            return None;
         }
 
-        let ropos = util::cast_s(ropos);
-        let rodir = util::cast_s(rodir);
-        let t1 = util::cast_f32((-b - discrim.sqrt()) / a);
+        let ropos = wider::cast_s(ropos);
+        let rodir = wider::cast_s(rodir);
 
-        let m1 = t1.cmp_gt(f32x4::ZERO)
+        let t1 = wider::cast_f32((-b - discrim.sqrt()) / a);
+        let opos1 = ropos + rodir * t1;
+        let uv1 = Self::uvx4(opos1);
+
+        let m1 = t1.cmp_ge(f32x4::ZERO)
+            & self.cutoutx4(rays.pos + rays.dir * t1, rays.dir, t1, opos1, uv1, depth);
+
+        if m1.all() {
+            let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos1).normalized();
+            return Some(ray::Hitx4 {
+                wotrans: wider::Mat4x4_splat(&self.wotrans),
+                wpos: rays.pos + rays.dir * t1,
+                wdir: rays.dir,
+                wnorm,
+                t: t1,
+                norm: Vec3x4::blend(rodir.dot(opos1).cmp_gt(f32x4::ZERO), -wnorm, wnorm),
+                uv: uv1,
+                color: Vec3x4::broadcast(wider::f32x4_NAN),
+                material: (self.material as u32).into(),
+            });
+        }
+
+        let t2 = wider::cast_f32((-b + discrim.sqrt()) / a);
+        let opos2 = ropos + rodir * t2;
+
+        let m2 = wider::cast_f32(discrim.cmp_ne(f64x4::ZERO))
+            & t2.cmp_ge(f32x4::ZERO)
             & self.cutoutx4(
-                rays.pos + rays.dir * t1,
+                rays.pos + rays.dir * t2,
                 rays.dir,
-                ropos + rodir * t1,
-                t1,
+                t2,
+                opos2,
+                Self::uvx4(opos2),
                 depth,
             );
 
-        if m1.all() {
-            return t1;
-        }
+        let t = m1.blend(t1, m2.blend(t2, wider::f32x4_NAN));
+        let opos = ropos + rodir * t;
+        let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
 
-        let t2 = util::cast_f32(
-            discrim
-                .cmp_ne(f64x4::ZERO)
-                .blend((-b + discrim.sqrt()) / a, util::f64x4_NAN),
-        );
-
-        let m2 = self.cutoutx4(
-            rays.pos + rays.dir * t2,
-            rays.dir,
-            ropos + rodir * t2,
-            t2,
-            depth,
-        );
-
-        m1.blend(t1, m2.blend(t2, util::f32x4_NAN))
+        Some(ray::Hitx4 {
+            wotrans: wider::Mat4x4_splat(&self.wotrans),
+            wpos: rays.pos + rays.dir * t,
+            wdir: rays.dir,
+            wnorm,
+            t,
+            norm: Vec3x4::blend(rodir.dot(opos).cmp_gt(f32x4::ZERO), -wnorm, wnorm),
+            uv: Self::uvx4(opos),
+            color: Vec3x4::broadcast(wider::f32x4_NAN),
+            material: (self.material as u32).into(),
+        })
     }
 }
 
 impl Sphere {
     #[inline]
-    fn shaderparams(&self) -> *const core::ffi::c_void {
-        self.shaderparams
-            .as_ref()
-            .map_or(core::ptr::null(), |p| p.as_ptr().cast())
+    pub fn extract_translation(&self) -> Vec3 {
+        self.wotrans.inversed().extract_translation()
     }
 
     #[inline]
-    fn cutoutparams(&self) -> *const core::ffi::c_void {
-        if let Some(p) = self.cutoutparams.as_ref() {
-            p.as_ptr().cast()
-        } else {
-            core::ptr::null()
-        }
+    pub fn extract_avg_scale_sq(&self) -> f32 {
+        let inv3 = self.wotrans.inversed().truncate();
+        (inv3.cols[0].mag_sq() + inv3.cols[1].mag_sq() + inv3.cols[2].mag_sq()) / 9.
     }
 
     #[inline]
     pub fn uv(opos: Vec3) -> (f32, f32) {
         (
-            (f32::atan2(opos.x, opos.z) / (2. * core::f32::consts::PI)) % 1.,
+            (f32::atan2(opos.x, opos.z) / (2. * core::f32::consts::PI)).rem_euclid(1.),
             f32::acos(opos.y) / core::f32::consts::PI,
         )
     }
@@ -343,12 +259,9 @@ impl Sphere {
     pub fn create(state: &WorldState, ctm: Mat4) -> Self {
         Self {
             wotrans: ctm.inversed(),
-            owtrans: ctm,
             cutout: state.cutout,
             cutoutparams: state.cutoutparams.clone(),
-            shader: state.shader,
-            shaderparams: state.shaderparams.clone(),
-            material: state.material,
+            material: state.get_materialidx(),
         }
     }
 }

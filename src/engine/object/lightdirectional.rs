@@ -1,8 +1,7 @@
 use ultraviolet::Vec3;
 
-use crate::engine::ray::ShadowRay;
-
 use super::Light;
+use super::ray::ShadowRay;
 
 pub(crate) struct DirectionalLight {
     dir: Vec3,
@@ -15,7 +14,7 @@ impl Light for DirectionalLight {
             pos,
             dir: self.dir,
             max_t: f32::INFINITY,
-            irradiance: Some(self.irradiance),
+            irradiance: self.irradiance,
         }
     }
 }

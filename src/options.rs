@@ -7,7 +7,10 @@
 
 #![allow(dead_code)] // given complete: your renderer uses the rest as it grows
 
-use std::sync::{LazyLock, RwLock};
+use std::{
+    num::NonZeroU16,
+    sync::{LazyLock, RwLock},
+};
 
 /// Which homework this renderer is at: 2, 3 or 4. Set it when a homework
 /// starts. It picks the default integrator (whitted, cook, kajiya), which
@@ -31,11 +34,10 @@ pub fn homework_integrator() -> &'static str {
 #[derive(Clone, Debug)]
 pub struct Options {
     pub integrator: String, /* --integrator whitted|cook|kajiya; this homework's unless given */
-    pub width: i32,         /* --width W --height H; 0: the scene's rtFormat */
-    pub height: i32,
-    pub spp: i32,       /* --spp N; 0: the scene's rtPixelSamples */
+    pub width: Option<NonZeroU16>, /* --width W --height H; 0: the scene's rtFormat */
+    pub height: Option<NonZeroU16>,
+    pub spp: Option<NonZeroU16>, /* --spp N; 0: the scene's rtPixelSamples */
     pub max_depth: i32, /* --max-depth N (0: no secondary rays); -1: the scene's rtMaxDepth */
-    // TODO last pass optimization & corrected max handling
     pub ambient: Option<[f32; 3]>, /* --ambient R G B: ka of the shading formula, overriding the scene's rtAmbient */
     pub threads: usize,            /* --threads N; 0: all cores */
     pub no_accel: bool,            /* --no-accel: a linear scan over every primitive */
@@ -50,8 +52,8 @@ pub struct Options {
     pub aov: String, /* --aov NAME: a debug image instead of the beauty, by name; the renderer knows
                      which it has (HW2: raydir, normal, ng, depth, uv, albedo, cost, shadow; HW3 adds
                      ao) and refuses another; "": the beauty image */
-    pub trace_x: i32, /* --trace X Y: the pixel whose rays the renderer logs (debug.rs); -1: none */
-    pub trace_y: i32,
+    pub trace_x: u32, /* --trace X Y: the pixel whose rays the renderer logs (debug.rs); -1: none */
+    pub trace_y: u32,
     pub progress: bool, /* --progress: a line on stderr every two seconds while rendering (timer.rs) */
     pub frame_first: i32, /* --frames A-B: render frames A to B of a movie only (the worlds since rtBegin,
                           from 0); -1: every frame */
@@ -78,9 +80,9 @@ impl Options {
     pub fn new() -> Options {
         Options {
             integrator: homework_integrator().to_string(),
-            width: 0,
-            height: 0,
-            spp: 0,
+            width: None,
+            height: None,
+            spp: None,
             max_depth: -1,
             ambient: None,
             threads: 0,
@@ -93,8 +95,8 @@ impl Options {
             exposure: 0.0,
             exposure_set: false,
             aov: String::new(),
-            trace_x: -1,
-            trace_y: -1,
+            trace_x: u32::MAX,
+            trace_y: u32::MAX,
             progress: false,
             frame_first: -1,
             frame_last: -1,
