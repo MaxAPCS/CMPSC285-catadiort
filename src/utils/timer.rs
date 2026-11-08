@@ -4,6 +4,7 @@
 //! the acceleration structure is ready (build), starts another around the
 //! pixel loop (render), and reads the first again after the image is
 //! written (total).
+#![allow(unused)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;

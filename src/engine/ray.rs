@@ -94,7 +94,7 @@ impl Hitx4 {
             f32x4::blend(me, self.uv.1, other.uv.1),
         );
         self.color = Vec3x4::blend(me, self.color, other.color);
-        self.material = u32x4::blend(wider::cast_u32x4(me), self.material, other.material);
+        self.material = u32x4::blend(bytemuck::cast(me), self.material, other.material);
     }
 
     pub fn shade(&self, material: &Material, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
@@ -166,7 +166,7 @@ fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4) -> (f32x4, Vec3x4) {
     let flip = ondi.cmp_gt(f32x4::ZERO);
     let ndi = flip.blend(-ondi, ondi);
     let norm = Vec3x4::blend(flip, -norm, norm);
-    let eta = flip.blend(eta.recip(), eta);
+    let eta = flip.blend(eta, eta.recip());
 
     let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
     let tir = k.cmp_lt(f32x4::ZERO);

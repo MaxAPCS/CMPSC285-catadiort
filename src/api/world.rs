@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex};
 use ultraviolet::{Mat4, Vec3};
 
-use super::transform;
-use super::*;
+use super::{transform, *};
 use crate::engine::{DirectionalLight, Material, Mesh, PointLight, Sphere, SpotLight, World};
 
 pub(crate) struct WorldState {

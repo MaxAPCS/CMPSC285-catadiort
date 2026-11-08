@@ -231,8 +231,9 @@ impl Screen {
                                 rt_trace!(
                                     idxs[i] / width,
                                     idxs[i] % width,
-                                    "light i: behind the surface (or: N . L <= 0, out of reach)"
-                                )
+                                    "{}light i: behind the surface (or: N . L <= 0, out of reach)",
+                                    " ".repeat(depth as _)
+                                );
                             }
                             return None;
                         }

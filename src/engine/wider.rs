@@ -103,11 +103,6 @@ pub fn Mat4x4_splat(mat4: &Mat4) -> Mat4x4 {
 }
 
 #[inline]
-pub fn cast_u32x4(a: f32x4) -> u32x4 {
-    bytemuck::cast(a.fast_trunc_int())
-}
-
-#[inline]
 pub fn cast_f32x4(a: u32x4) -> f32x4 {
     f32x4::from_i32x4(bytemuck::cast::<u32x4, i32x4>(a))
 }

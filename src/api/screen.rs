@@ -1,18 +1,21 @@
 #![allow(non_snake_case)] // the rt* names and the context's fields are the interface's
 
 use core::num::NonZero;
-use std::ffi::{CStr, c_char};
-use std::sync::Mutex;
+use std::{
+    ffi::{CStr, c_char},
+    sync::Mutex,
+};
 
 use ultraviolet::Vec3;
 
-use super::transform;
-use super::*;
+use super::{transform, *};
 use crate::engine::Screen;
 use crate::options::{Options, options};
-use crate::utils::image::write_image;
-use crate::utils::texture;
-use crate::utils::timer::{RenderBudget, Timer};
+use crate::utils::{
+    image::write_image,
+    texture,
+    timer::{RenderBudget, Timer},
+};
 
 /// The graphics state. rtBegin resets it to the defaults listed at
 /// rtBegin. Options and attributes persist across rtWorldBegin/End pairs;
@@ -347,7 +350,7 @@ pub extern "C" fn rtWorldBegin(frame: RtInt) -> RtInt {
     (o.frame_first < 0 || (frame >= o.frame_first && frame <= o.frame_last)) as RtInt
 }
 
-/// Build the acceleration structure, render, write the image and print the
+/// Build the acceleration structure, render, write the image and output the
 /// TIME line (HW2 handout: timing):
 ///     TIME <scene> build=<s> render=<s> total=<s> threads=<n>
 /// build is the light list and the BVH, render the pixel loop, total

@@ -2,6 +2,7 @@ use bytemuck::Zeroable;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec3, Vec3x4};
+use wide::u32x4;
 use wide::{CmpGe, CmpGt, CmpLt, CmpNe, f32x4, f64x4};
 
 use super::Primitive;
@@ -75,7 +76,7 @@ impl Primitive for Sphere {
         depth: u16,
     ) -> f32x4 {
         let Some(cutout) = self.cutout else {
-            return f32x4::ONE;
+            return !f32x4::ZERO;
         };
 
         let wpos: [Vec3; 4] = wpos.into();
@@ -87,7 +88,7 @@ impl Primitive for Sphere {
         let opos: [Vec3; 4] = opos.into();
         let (u, v) = (uv.0.as_array_ref(), uv.1.as_array_ref());
 
-        let mut out = [1.; 4];
+        let mut out = [u32::MAX; 4];
         out.par_iter_mut().enumerate().for_each(|(i, out)| {
             let mut ctx = RtShadeContext::new(
                 &self.cutoutparams,
@@ -101,9 +102,12 @@ impl Primitive for Sphere {
                 depth,
                 RtMaterial::zeroed(), // todo: grab the actual material
             );
-            *out = unsafe { cutout(&mut ctx) } as _
+            if unsafe { cutout(&mut ctx) } == 0 {
+                *out = 0
+            }
         });
-        out.into()
+        let out: u32x4 = out.into();
+        bytemuck::cast(out)
     }
 
     fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {

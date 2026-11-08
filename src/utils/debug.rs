@@ -3,6 +3,7 @@
 //! does for one pixel, and the encoders below turn what a renderer knows
 //! at a hit into the --aov images, so every renderer writes the same
 //! pictures.
+#![allow(unused)]
 
 /// --trace X Y: the pixel loop calls trace_begin(px, py) before a pixel's
 /// samples and trace_end() after them; in between, rt_trace!(...) prints

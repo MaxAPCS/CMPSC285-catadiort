@@ -8,12 +8,12 @@ use rayon::{
 };
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec2, Vec2x4, Vec3, Vec3x4};
-use wide::{CmpGe, CmpLe, f32x4};
+use wide::{CmpGe, CmpLe, CmpNe, f32x4, u32x4};
 
 use super::Primitive;
 use super::ray;
 use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext, WorldState};
-use crate::engine::wider::{self, Mat4x4_splat};
+use crate::engine::wider;
 
 pub(crate) struct Mesh {
     triangles: Vec<Tri>,
@@ -134,7 +134,7 @@ impl Mesh {
         for opos in piter.take_remainder() {
             *opos = ctm.transform_point3(*opos);
         }
-        let owtrans = Mat4x4_splat(&ctm);
+        let owtrans = wider::Mat4x4_splat(&ctm);
         piter.for_each(|chunk| {
             let opos = Vec3x4::from(unsafe { *(chunk as *mut _ as *mut [Vec3; 4]) });
             let wpos = owtrans.transform_point3(opos);
@@ -148,7 +148,7 @@ impl Mesh {
             for onorm in niter.take_remainder() {
                 *onorm = dual.transform_vec3(*onorm);
             }
-            let dual = Mat4x4_splat(&dual);
+            let dual = wider::Mat4x4_splat(&dual);
             niter.for_each(|chunk| {
                 let onorm = Vec3x4::from(unsafe { *(chunk as *mut _ as *mut [Vec3; 4]) });
                 let wnorm = dual.transform_vec3(onorm);
@@ -255,7 +255,7 @@ impl Primitive for Tri {
         depth: u16,
     ) -> f32x4 {
         let Some(cutout) = self.details.cutout else {
-            return f32x4::ONE;
+            return !f32x4::ZERO;
         };
 
         let wpos: [Vec3; 4] = wpos.into();
@@ -268,7 +268,7 @@ impl Primitive for Tri {
         let (u, v) = (uv.0.as_array_ref(), uv.1.as_array_ref());
         let params = &self.details.cutoutparams;
 
-        let mut out = [1.; 4];
+        let mut out = [u32::MAX; 4];
         out.par_iter_mut().enumerate().for_each(|(i, out)| {
             let mut ctx = RtShadeContext::new(
                 params,
@@ -282,9 +282,12 @@ impl Primitive for Tri {
                 depth,
                 RtMaterial::zeroed(), // todo: grab the actual material
             );
-            *out = unsafe { cutout(&mut ctx) } as _
+            if unsafe { cutout(&mut ctx) } == 0 {
+                *out = 0
+            }
         });
-        out.into()
+        let out: u32x4 = out.into();
+        bytemuck::cast(out)
     }
 
     fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {
@@ -323,7 +326,7 @@ impl Primitive for Tri {
 
         let ray_cross_e2 = ray.dir.cross(e2);
         let det = e1.dot(ray_cross_e2);
-        let mut m = det.cmp_le(-f32::EPSILON) | det.cmp_ge(f32::EPSILON);
+        let mut m = det.cmp_ne(f32x4::ZERO);
         if m.none() {
             return None; // This ray is parallel to this triangle.
         }
