@@ -36,7 +36,7 @@ import subprocess
 import sys
 import time
 
-ROOT = pathlib.Path.cwd()
+ROOT = pathlib.Path.cwd() / "assets"
 TIERS = ("benchmark", "hero")
 ENTRY = re.compile(r'\{\s*"([^"]+)"\s*,\s*\w+\s*,\s*"([^"]+)"\s*\}')
 TIME = re.compile(r"^TIME (\S+) build=([\d.]+) render=([\d.]+) total=([\d.]+) threads=(\d+)", re.M)
@@ -56,10 +56,8 @@ def tier_scenes(root):
 
 def find_exe(root):
     """The built renderer: Visual Studio's, another generator's, or the Rust kit's."""
-    for p in ("build/Release/gauchoRT.exe", "build/gauchoRT.exe", "build/gauchoRT",
-              "rust/target/release/gauchoRT.exe", "rust/target/release/gauchoRT"):
-        if (root / p).exists():
-            return root / p
+    if (root / "target/release/catadiort").exists():
+        return root / "target/release/catadiort"
     sys.exit("timing_table: no built renderer found under build/ or rust/target/release/; pass --exe")
 
 

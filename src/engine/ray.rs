@@ -5,9 +5,12 @@ use super::DEPTH_COMPLEXITY;
 use super::Material;
 use super::object::Primitive;
 use crate::api::RtMaterial;
+use crate::api::RtShadeContext;
 
 pub(super) struct Rayx4 {
+    /// Worldspace Ray Origin
     pub pos: Vec3x4,
+    /// Worldspace Ray Direction
     pub dir: Vec3x4,
 
     hits: smallvec::SmallVec<[Hitx4; DEPTH_COMPLEXITY]>,
@@ -96,40 +99,13 @@ impl Hitx4 {
     }
 
     pub fn shade(&self, material: &Material, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
-        let opos = self.wotrans.transform_point3(self.wpos);
-        let wnorm = Vec3x4::blend(
-            self.wdir.dot(self.wnorm).cmp_gt(f32x4::ZERO),
-            -self.wnorm,
-            self.wnorm,
-        );
-
-        let wpos: [Vec3; 4] = self.wpos.into();
-        let wdir: [Vec3; 4] = self.wdir.into();
-        let wnorm: [Vec3; 4] = wnorm.into();
-        let t: [f32; 4] = *self.t.as_array_ref();
-        let norm: [Vec3; 4] = self.norm.into();
-        let opos: [Vec3; 4] = opos.into();
-        let (u, v) = (self.uv.0.as_array_ref(), self.uv.1.as_array_ref());
-        let color: [Vec3; 4] = self.color.into();
+        let hits: [Hit; 4] = self.into();
+        let opos: [Vec3; 4] = self.wotrans.transform_point3(self.wpos).into();
 
         let mut out_norms = [Vec3::zero(); 4];
         let mut out_matrs = [const { core::mem::MaybeUninit::uninit() }; 4];
         for i in 0..4 {
-            let (norm, matr) = material.shade(
-                wpos[i],
-                wdir[i],
-                wnorm[i],
-                t[i],
-                opos[i],
-                norm[i],
-                (u[i], v[i]),
-                if color[i].x.is_nan() {
-                    None
-                } else {
-                    Some(color[i])
-                },
-                depth,
-            );
+            let (norm, matr) = hits[i].shade(opos[i], material, depth);
             out_norms[i] = norm;
             out_matrs[i].write(matr);
         }
@@ -144,12 +120,15 @@ impl Hitx4 {
     #[inline]
     pub fn refract(&self, material: &Material) -> (f32x4, Vec3x4) {
         let entering = self.wdir.dot(self.wnorm).cmp_lt(f32x4::ZERO);
-        refractedx4(
-            self.wdir.normalized(),
+        let norm = Vec3x4::blend(
+            self.wdir.dot(self.norm).cmp_gt(f32x4::ZERO),
+            -self.norm,
             self.norm,
-            material.ior.into(),
-            entering,
-        )
+        );
+        let wscale = self.wdir.mag();
+        let (medium_cos, refractdir) =
+            refractedx4(self.wdir / wscale, norm, material.ior.into(), entering);
+        (medium_cos, refractdir * wscale)
     }
 }
 
@@ -159,7 +138,7 @@ impl Hitx4 {
 /// - eta: object ior / medium ior
 /// Returns:
 /// - medium_cos: cosine between dir to norm on medium side
-/// - odir: NaN if TIR, normalized
+/// - refractdir: NaN if TIR, normalized
 #[inline]
 fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4, Vec3x4) {
     let ndi = norm.dot(dir);
@@ -167,7 +146,7 @@ fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4
     let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
     let sqrtk = k.sqrt(); // medium side cos, or NaN on TIR
     (
-        entering.blend(-ndi, sqrtk),
+        k.cmp_lt(f32x4::ZERO).blend(f32x4::ZERO, -ndi),
         dir.mul_add(Vec3x4::broadcast(eta), -(eta * ndi + sqrtk) * norm),
     )
 }
@@ -178,14 +157,14 @@ pub(super) struct Hit {
     pub wotrans: Mat4,
     /// Worldspace Hit Position
     pub wpos: Vec3,
-    /// Worldspace Incident Direction
+    /// Worldspace Incident Direction (towards wpos)
     pub wdir: Vec3,
-    /// Worldspace Surface Normal, normalized
+    /// Worldspace Surface Normal (opposite wdir), normalized
     pub wnorm: Vec3,
     /// Ray Time
     pub t: f32,
 
-    /// Shading Normal, normalized, flipped
+    /// Shading Normal (opposite wdir), normalized
     pub norm: Vec3,
     /// Shading UV
     pub uv: (f32, f32),
@@ -195,7 +174,33 @@ pub(super) struct Hit {
     pub material: u32,
 }
 
-impl Into<[Hit; 4]> for Hitx4 {
+impl Hit {
+    fn shade(&self, opos: Vec3, material: &Material, depth: u16) -> (Vec3, RtMaterial) {
+        let mut matr: RtMaterial = material.into();
+        if !self.color.x.is_nan() {
+            matr.albedo = self.color;
+        };
+        let Some(shader) = material.shader else {
+            return (self.norm, matr);
+        };
+        let mut ctx = RtShadeContext::new(
+            &material.shaderparams,
+            self.wpos,
+            self.wdir,
+            self.wnorm,
+            self.t,
+            opos,
+            self.norm,
+            self.uv,
+            depth,
+            matr,
+        );
+        unsafe { shader(&mut ctx) };
+        (ctx.N, ctx.m)
+    }
+}
+
+impl Into<[Hit; 4]> for &Hitx4 {
     fn into(self) -> [Hit; 4] {
         let wotrans: [[Vec4; 4]; 4] = self.wotrans.cols.map(|c| c.into());
         let wpos: [Vec3; 4] = self.wpos.into();
@@ -250,7 +255,9 @@ impl From<[Hit; 4]> for Hitx4 {
 }
 
 pub(super) struct ShadowRay {
+    /// Worldspace Ray Origin
     pub pos: Vec3,
+    /// Worldspace Ray Direction
     pub dir: Vec3,
     pub max_t: f32,
     pub irradiance: Vec3,

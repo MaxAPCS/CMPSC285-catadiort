@@ -40,7 +40,7 @@ impl Light for SpotLight {
 
         ShadowRay {
             pos,
-            dir,
+            dir: -dir,
             max_t: dst,
             irradiance: self.intensity * cone * reach / dst_sq,
         }

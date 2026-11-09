@@ -8,6 +8,7 @@ use std::{
 use ultraviolet::Vec3;
 
 use super::{transform, *};
+use crate::AOV;
 use crate::engine::Screen;
 use crate::options::{Options, options};
 use crate::utils::{
@@ -405,15 +406,13 @@ pub extern "C" fn rtWorldEnd() {
 
     let total = Timer::new();
     let (build_time, render, budget, rgb) = {
-        /* TODO: build (Workflow, steps 9 and 14): the light list (the delta
-         * lights and the emissive draw calls' stand-ins) and the BVH over every
-         * primitive. */
         let mut world = world::take();
         world.ambientcolor = s.ambient.into();
         world.environmentcolor = s.background.into();
         world.environmenttex = s.environment;
         world.environmentscale = s.environment_scale;
         world.environmentrotation = s.environment_rotate_y.to_radians();
+        world.finish();
 
         let fwd = (s.lookat - s.eye).normalized();
         let up = fwd.cross(s.up).cross(fwd).normalized();
@@ -424,9 +423,6 @@ pub extern "C" fn rtWorldEnd() {
             s.fovy.to_radians(),
             (s.res.0 as _, s.res.1 as _),
         );
-
-        world.finish();
-
         let build_time = total.seconds();
 
         let render = Timer::new();
@@ -442,15 +438,14 @@ pub extern "C" fn rtWorldEnd() {
 
     /* The scene's tone map and exposure, unless the command line says
      * otherwise; a debug image (--aov) is written as it is. */
-    let aov = !o.aov.is_empty();
-    let tonemap = if aov {
+    let tonemap = if AOV {
         "none".to_string()
     } else if o.tonemap.is_empty() {
         s.tonemap.clone()
     } else {
         o.tonemap.clone()
     };
-    let exposure = if aov {
+    let exposure = if AOV {
         0.0
     } else if o.exposure_set {
         o.exposure
@@ -468,10 +463,10 @@ pub extern "C" fn rtWorldEnd() {
         &o.format,
     );
 
-    let scene_name = if o.scene.is_empty() {
-        &s.display
+    let scene_name = if !o.scene.is_empty() {
+        o.scene.clone()
     } else {
-        &o.scene
+        s.display.clone()
     };
     println!(
         "TIME {} build={:.3} render={:.3} total={:.3} threads={}",
@@ -481,7 +476,5 @@ pub extern "C" fn rtWorldEnd() {
         total.seconds(),
         thread_count(&o)
     );
-    budget.report(scene_name, render_time, pixels, s.samples as _);
-
-    world::clear();
+    budget.report(&scene_name, render_time, pixels, s.samples as _);
 }

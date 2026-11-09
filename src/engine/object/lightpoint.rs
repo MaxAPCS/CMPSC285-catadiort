@@ -40,13 +40,13 @@ impl PointLight {
             return None;
         }
 
-        let scale_sq = o.extract_avg_scale_sq();
-        let intensity = scale_sq * core::f32::consts::PI * material.emission;
+        let scale = o.extract_avg_scale();
+        let intensity = scale * scale * core::f32::consts::PI * material.emission;
 
         Some(Self {
             pos: o.centroid(),
             intensity,
-            radius: scale_sq.sqrt(),
+            radius: scale.sqrt(),
         })
     }
 }

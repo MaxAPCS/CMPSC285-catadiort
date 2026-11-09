@@ -61,13 +61,7 @@ fn main() {
     }
 }
 
-#[cfg(any(
-    feature = "aovraydir",
-    feature = "aovdepth",
-    feature = "aovnormal",
-    feature = "aovalbedo"
-))]
-const _: () = {
+pub(crate) const AOV: bool = {
     let count = cfg!(feature = "aovraydir") as u8
         + cfg!(feature = "aovdepth") as u8
         + cfg!(feature = "aovnormal") as u8
@@ -75,4 +69,5 @@ const _: () = {
     if count > 1 {
         panic!("at most one of the `aov*` features may be enabled at a time");
     }
+    count > 0
 };

@@ -161,12 +161,12 @@ impl Mesh {
             let dual = wotrans.transposed();
             let mut niter = normals.par_chunks_exact_mut(4);
             for onorm in niter.take_remainder() {
-                *onorm = dual.transform_vec3(*onorm);
+                *onorm = dual.transform_vec3(*onorm).normalized();
             }
             let dual = wider::Mat4x4_splat(&dual);
             niter.for_each(|chunk| {
                 let onorm = Vec3x4::from(unsafe { *(chunk as *mut _ as *mut [Vec3; 4]) });
-                let wnorm = dual.transform_vec3(onorm);
+                let wnorm = dual.transform_vec3(onorm).normalized();
                 let mut wnorm: [Vec3; 4] = wnorm.into();
                 chunk.swap_with_slice(&mut wnorm);
             });
@@ -451,13 +451,14 @@ impl Tri {
 
     #[inline]
     fn norm(&self, bc: (f32, f32)) -> Option<Vec3> {
-        self.normals().map(|normals| trilerp(bc, normals))
+        self.normals()
+            .map(|normals| trilerp(bc, normals).normalized())
     }
 
     #[inline]
     fn normx4(&self, bc: (f32x4, f32x4)) -> Option<Vec3x4> {
         self.normals()
-            .map(|normals| trilerpx4(bc, normals.map(Vec3x4::splat)))
+            .map(|normals| trilerpx4(bc, normals.map(Vec3x4::splat)).normalized())
     }
 
     #[inline]

@@ -4,6 +4,9 @@ Cargo.lock
 renders/
 reference_renders/
 
+assets/models/attic
+assets/models/sponza
+assets/models/crown
 assets/models/fishycat
 assets/models/barbershop
 assets/models/sanmiguel

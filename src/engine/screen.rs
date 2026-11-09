@@ -147,13 +147,16 @@ impl Screen {
             let Some(hit) = rays.get() else {
                 let env: [Vec3; 4] = world.sample_environmentx4(rays.dir).into();
                 for i in 0..4 {
+                    if wghs[i].component_max() <= 0. {
+                        continue;
+                    }
                     frame[idxs[i] as usize] += wghs[i] * env[i];
                 }
                 return;
             };
-            let hits: [ray::Hit; 4] = hit.into();
+            let hits: [ray::Hit; 4] = (&hit).into();
             for (i, hit) in hits.into_iter().enumerate() {
-                if wghs[i].component_max() <= 0.0 {
+                if wghs[i].component_max() <= 0. {
                     continue;
                 }
                 if hit.t.is_nan() {
@@ -206,20 +209,22 @@ impl Screen {
         }
 
         // Shade Source Hits
-        srchitx4s.par_iter_mut().for_each(|(idxs, wghs, hits)| {
+        srchitx4s.par_iter_mut().for_each(|(_, wghs, hits)| {
             // debug_assert_eq!(
             //     hits.material,
             //     wide::u32x4::splat(hits.material.as_array_ref()[0])
             // ); this assertion will not pass because the last material is zeroed after a flush
             let material = &world.materials[hits.material.as_array_ref()[0] as usize];
 
+            hits.norm = wider::copysignx4(hits.norm, -hits.wdir);
             let (norm, matrs) = hits.shade(material, depth);
+            hits.norm = wider::copysignx4(norm, -hits.wdir); // write back shader norms
 
             let mut contribs = [Vec3::zero(); 4];
             let wnorm: [Vec3; 4] = hits.wnorm.into();
             let wpos: [Vec3; 4] = hits.wpos.into();
             let wdir: [Vec3; 4] = hits.wdir.into();
-            let norma: [Vec3; 4] = norm.into();
+            let norm: [Vec3; 4] = hits.norm.into();
             let wghsa: [Vec3; 4] = (*wghs).into();
 
             for i in 0..4 {
@@ -229,30 +234,20 @@ impl Screen {
                 let shadowrays: Vec<_> = world
                     .shadowrays(wpos[i])
                     .filter_map(|mut sr| {
-                        if sr.dir.dot(norma[i]) <= 0.0 {
-                            #[cfg(debug_assertions)]
-                            {
-                                rt_trace!(
-                                    idxs[i] / width,
-                                    idxs[i] % width,
-                                    "{}light i: behind the surface (or: N . L <= 0, out of reach)",
-                                    " ".repeat(depth as _)
-                                );
-                            }
+                        if sr.dir.dot(wnorm[i]) <= 0.0 {
                             return None;
                         }
-                        sr.pos += wider::copysign(norma[i] * RECAST_EPSILON, sr.dir);
+                        sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
                         world.shadow(&mut sr, depth);
                         Some(sr)
                     })
                     .collect();
                 contribs[i] =
-                    matrs[i].color(shadowrays.as_slice(), norma[i], wdir[i], world.ambientcolor);
+                    matrs[i].color(shadowrays.as_slice(), norm[i], wdir[i], world.ambientcolor);
                 if wnorm[i].dot(wdir[i]) < 0. || material.emission == Vec3::zero() {
                     contribs[i] += matrs[i].emission;
                 }
             }
-            hits.norm = norm; // write back shader norms
             let contribs: Vec3x4 = contribs.into();
             hits.color = contribs * *wghs; // write contribs into hit colors
         });

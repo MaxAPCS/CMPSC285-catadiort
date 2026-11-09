@@ -154,6 +154,9 @@ fn extension(name: &str) -> String {
 pub fn load(file: &str, srgb: bool) -> i32 {
     let mut path = file.to_string();
     if !std::path::Path::new(&path).is_file() {
+        path = format!("assets/{}", file);
+    }
+    if !std::path::Path::new(&path).is_file() {
         path = format!("assets/textures/{}", file);
     }
     if !std::path::Path::new(&path).is_file() {

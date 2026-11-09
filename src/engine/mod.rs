@@ -14,7 +14,7 @@ pub(crate) use object::*;
 pub(crate) use screen::*;
 pub(crate) use world::*;
 
-const RECAST_EPSILON: f32 = 1e-4;
+const RECAST_EPSILON: f32 = 1e-2;
 const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
 const DEPTH_COMPLEXITY: usize = 4;
 
@@ -71,6 +71,8 @@ impl Material {
         (1. - self.roughness * self.roughness * 0.15f32.recip()).max(0.)
     }
 
+    /// Arguments:
+    /// - medium_cos: cosine between incident and medium-facing normal
     #[inline]
     fn fresnelx4(&self, medium_cos: wide::f32x4) -> Vec3x4 {
         if self.ior == world::MEDIUM_IOR {
@@ -80,42 +82,6 @@ impl Material {
         let t = f32x4::ONE - medium_cos;
         let t2 = t * t;
         f0 + (Vec3x4::one() - f0) * Vec3x4::broadcast(t2 * t2 * t)
-    }
-
-    fn shade(
-        &self,
-        wpos: Vec3,
-        wdir: Vec3,
-        wnorm: Vec3,
-        t: f32,
-        opos: Vec3,
-
-        norm: Vec3,
-        uv: (f32, f32),
-        color: Option<Vec3>,
-        depth: u16,
-    ) -> (Vec3, RtMaterial) {
-        let Some(shader) = self.shader else {
-            return (wnorm, self.into());
-        };
-        let mut material: RtMaterial = self.into();
-        let mut ctx = RtShadeContext::new(
-            &self.shaderparams,
-            wpos,
-            wdir,
-            wnorm,
-            t,
-            opos,
-            norm,
-            uv,
-            depth,
-            material,
-        );
-        unsafe { shader(&mut ctx) };
-        if let Some(color) = color {
-            ctx.m.albedo = color;
-        };
-        (ctx.N, ctx.m)
     }
 
     pub(crate) const fn from(

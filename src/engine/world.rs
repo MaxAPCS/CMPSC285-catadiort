@@ -4,6 +4,7 @@ use wide::f32x4;
 use super::object;
 use super::ray;
 use super::{Light, Material};
+use crate::engine::Primitive;
 use crate::utils::texture;
 
 pub const MEDIUM_IOR: f32 = 1.0;
@@ -99,7 +100,7 @@ impl World {
         let (u, v) =
             object::Sphere::uv(dir.rotated_by(Rotor3::from_rotation_xz(self.environmentrotation)));
         let tex = texture::lookup_lat_long(self.environmenttex, u, v) * self.environmentscale;
-        Vec3::from_homogeneous_point(tex)
+        Vec3::from_homogeneous_point(tex) + self.environmentcolor * (1. - tex.w)
     }
 
     pub(super) fn sample_environmentx4(&self, dir: Vec3x4) -> Vec3x4 {
@@ -119,7 +120,8 @@ impl World {
         Vec3x4::blend(
             dir.x.is_nan(),
             Vec3x4::zero(),
-            Vec3x4::from_homogeneous_point(tex * f32x4::splat(self.environmentscale)),
+            Vec3x4::from_homogeneous_point(tex * f32x4::splat(self.environmentscale))
+                + Vec3x4::splat(self.environmentcolor) * (f32x4::ONE - tex.w),
         )
     }
 }

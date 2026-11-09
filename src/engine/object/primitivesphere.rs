@@ -239,16 +239,16 @@ impl Primitive for Sphere {
 
 impl Sphere {
     #[inline]
-    pub fn extract_avg_scale_sq(&self) -> f32 {
+    pub fn extract_avg_scale(&self) -> f32 {
         let inv3 = self.wotrans.inversed().truncate();
-        (inv3.cols[0].mag_sq() + inv3.cols[1].mag_sq() + inv3.cols[2].mag_sq()) / 9.
+        (inv3.cols[0].mag() + inv3.cols[1].mag() + inv3.cols[2].mag()) / 3.
     }
 
     #[inline]
     pub fn uv(opos: Vec3) -> (f32, f32) {
         (
             (f32::atan2(opos.x, opos.z) / (2. * core::f32::consts::PI)).rem_euclid(1.),
-            f32::acos(opos.y) / core::f32::consts::PI,
+            f32::acos(opos.y.clamp(-1., 1.)) / core::f32::consts::PI,
         )
     }
 
@@ -256,7 +256,7 @@ impl Sphere {
     pub fn uvx4(opos: Vec3x4) -> (f32x4, f32x4) {
         let mut u = f32x4::atan2(opos.x, opos.z) / (2. * f32x4::PI);
         u = u - u.floor();
-        let v = f32x4::acos(opos.y) / f32x4::PI;
+        let v = f32x4::acos(opos.y.fast_min(f32x4::ONE).fast_max(-f32x4::ONE)) / f32x4::PI;
         (u, v)
     }
 
