@@ -200,6 +200,10 @@ impl Mesh {
                 .collect(),
         }
     }
+
+    pub fn material(&self) -> usize {
+        self.triangles[0].details.material
+    }
 }
 
 pub(super) struct Tri {
@@ -336,7 +340,7 @@ impl Primitive for Tri {
         }
 
         let t = inv_det * self.e2.dot(s_cross_e1);
-        if t <= 0. || t > ray.max_t {
+        if t <= 0. || t >= ray.max_t {
             return false;
         }
 

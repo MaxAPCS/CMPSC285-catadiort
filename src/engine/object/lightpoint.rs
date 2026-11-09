@@ -6,9 +6,8 @@ use super::{Sphere, ray::ShadowRay};
 use crate::api::RtMaterial;
 
 pub(crate) struct PointLight {
-    pos: Vec3,
-    intensity: Vec3,
-
+    pub(super) pos: Vec3,
+    pub(super) intensity: Vec3,
     radius: f32,
 }
 

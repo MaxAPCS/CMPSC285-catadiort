@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use ultraviolet::{Vec3, Vec3x4};
+use ultraviolet::Vec3;
 use wide::f32x4;
 
 use crate::api::{RtMaterial, RtShadeContext, RtShaderFn};
@@ -14,7 +14,7 @@ pub(crate) use object::*;
 pub(crate) use screen::*;
 pub(crate) use world::*;
 
-const RECAST_EPSILON: f32 = 1e-2;
+const RECAST_EPSILON: f32 = 1e-4;
 const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
 const DEPTH_COMPLEXITY: usize = 4;
 
@@ -67,21 +67,28 @@ impl Material {
     }
 
     #[inline]
+    const fn emits(&self) -> bool {
+        self.emission.x > 0. || self.emission.y > 0. || self.emission.z > 0.
+    }
+
+    #[inline]
     const fn smoothness(&self) -> f32 {
         (1. - self.roughness * self.roughness * 0.15f32.recip()).max(0.)
     }
 
     /// Arguments:
     /// - medium_cos: cosine between incident and medium-facing normal
+    /// - object_ior: index of refraction of object
     #[inline]
-    fn fresnelx4(&self, medium_cos: wide::f32x4) -> Vec3x4 {
+    fn fresnelx4(&self, medium_cos: wide::f32x4, object_ior: f32x4) -> f32x4 {
         if self.ior == world::MEDIUM_IOR {
-            return Vec3x4::zero();
+            return f32x4::ZERO;
         }
-        let f0 = Vec3x4::splat(self.specular);
+        let f0 = (object_ior - 1.) / (object_ior + 1.);
+        let f0 = f0 * f0;
         let t = f32x4::ONE - medium_cos;
         let t2 = t * t;
-        f0 + (Vec3x4::one() - f0) * Vec3x4::broadcast(t2 * t2 * t)
+        f0 + (f32x4::ONE - f0) * t2 * t2 * t
     }
 
     pub(crate) const fn from(

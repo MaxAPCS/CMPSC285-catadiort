@@ -20,7 +20,7 @@ pub(crate) struct Sphere {
     cutoutparams: Option<Arc<[u8]>>,
 
     /// Material Properties
-    material: usize,
+    pub material: usize,
 }
 
 impl Primitive for Sphere {
@@ -130,7 +130,7 @@ impl Primitive for Sphere {
 
         let t1 = (-b - discrim.sqrt()) / a;
 
-        if t1 > ray.max_t {
+        if t1 >= ray.max_t {
             return false;
         }
 
@@ -155,7 +155,7 @@ impl Primitive for Sphere {
         let t2 = (-b + discrim.sqrt()) / a;
 
         let opos2 = ropos + rodir * t2;
-        (t2 > 0. && t2 <= ray.max_t)
+        (t2 > 0. && t2 < ray.max_t)
             & self.cutout(
                 ray.pos + ray.dir * t2,
                 ray.dir,

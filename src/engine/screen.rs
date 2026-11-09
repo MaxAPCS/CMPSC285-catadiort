@@ -210,15 +210,11 @@ impl Screen {
 
         // Shade Source Hits
         srchitx4s.par_iter_mut().for_each(|(_, wghs, hits)| {
-            // debug_assert_eq!(
-            //     hits.material,
-            //     wide::u32x4::splat(hits.material.as_array_ref()[0])
-            // ); this assertion will not pass because the last material is zeroed after a flush
             let material = &world.materials[hits.material.as_array_ref()[0] as usize];
 
             hits.norm = wider::copysignx4(hits.norm, -hits.wdir);
             let (norm, matrs) = hits.shade(material, depth);
-            hits.norm = wider::copysignx4(norm, -hits.wdir); // write back shader norms
+            hits.norm = wider::copysignx4(norm.normalized(), -hits.wdir); // write back shader norms
 
             let mut contribs = [Vec3::zero(); 4];
             let wnorm: [Vec3; 4] = hits.wnorm.into();
@@ -234,7 +230,7 @@ impl Screen {
                 let shadowrays: Vec<_> = world
                     .shadowrays(wpos[i])
                     .filter_map(|mut sr| {
-                        if sr.dir.dot(wnorm[i]) <= 0.0 {
+                        if sr.dir.dot(norm[i]) <= 0.0 {
                             return None;
                         }
                         sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
@@ -244,7 +240,7 @@ impl Screen {
                     .collect();
                 contribs[i] =
                     matrs[i].color(shadowrays.as_slice(), norm[i], wdir[i], world.ambientcolor);
-                if wnorm[i].dot(wdir[i]) < 0. || material.emission == Vec3::zero() {
+                if wnorm[i].dot(wdir[i]) < 0. || !material.emits() {
                     contribs[i] += matrs[i].emission;
                 }
             }
@@ -296,16 +292,16 @@ impl Screen {
                 }
                 if material.refracts() {
                     let (ndi, refractdir) = hits.refract(material);
-                    let reflectwgh = Vec3x4::blend(
+                    let reflectwgh = f32x4::blend(
                         refractdir.x.is_nan(),
-                        Vec3x4::one(),
-                        material.fresnelx4(ndi),
+                        f32x4::ONE,
+                        material.fresnelx4(ndi, material.ior.into()),
                     );
                     let reflectdir = hits.reflect();
 
                     children.push((
                         idxs,
-                        wghs * reflectwgh,
+                        wghs * Vec3x4::splat(material.specular) * Vec3x4::broadcast(reflectwgh),
                         ray::Rayx4::new(
                             hits.wpos
                                 + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
@@ -316,8 +312,7 @@ impl Screen {
                     if !refractdir.x.is_nan().all() {
                         children.push((
                             idxs,
-                            wghs * (Vec3x4::one() - reflectwgh)
-                                * f32x4::splat(material.transmission),
+                            wghs * (f32x4::ONE - reflectwgh) * f32x4::splat(material.transmission),
                             ray::Rayx4::new(
                                 hits.wpos
                                     + wider::copysignx4(hits.wnorm, refractdir) * RECAST_EPSILON_X4,

@@ -73,8 +73,8 @@ pub fn from_emissive(o: &Mesh, material: &crate::api::RtMaterial) -> Option<Mesh
     if flat {
         Some(MeshEmissive::Plane(PlaneLight {
             pos: o.centroid(),
-            emission: material.emission * doublearea / 2.,
-            norm: -wnorm0,
+            intensity: material.emission * doublearea / 2.,
+            norm: wnorm0,
         }))
     } else {
         Some(MeshEmissive::Point(PointLight::new(

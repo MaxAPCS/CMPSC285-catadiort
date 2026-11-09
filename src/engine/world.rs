@@ -4,7 +4,6 @@ use wide::f32x4;
 use super::object;
 use super::ray;
 use super::{Light, Material};
-use crate::engine::Primitive;
 use crate::utils::texture;
 
 pub const MEDIUM_IOR: f32 = 1.0;
@@ -66,12 +65,12 @@ impl World {
 
     pub(super) fn shadow(&self, rays: &mut ray::ShadowRay, depth: u16) {
         for s in &self.spheres {
-            if rays.intersect(s, depth) {
+            if !self.materials[s.material].emits() && rays.intersect(s, depth) {
                 return;
             }
         }
         for m in &self.meshes {
-            if rays.intersect(m, depth) {
+            if !self.materials[m.material()].emits() && rays.intersect(m, depth) {
                 return;
             }
         }
