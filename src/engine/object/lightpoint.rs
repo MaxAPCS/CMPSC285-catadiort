@@ -1,6 +1,7 @@
 use ultraviolet::Vec3;
 
 use super::Light;
+use super::Primitive;
 use super::{Sphere, ray::ShadowRay};
 use crate::api::RtMaterial;
 
@@ -43,7 +44,7 @@ impl PointLight {
         let intensity = scale_sq * core::f32::consts::PI * material.emission;
 
         Some(Self {
-            pos: o.extract_translation(),
+            pos: o.centroid(),
             intensity,
             radius: scale_sq.sqrt(),
         })

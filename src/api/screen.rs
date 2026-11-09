@@ -5,7 +5,6 @@ use std::{
     ffi::{CStr, c_char},
     sync::Mutex,
 };
-
 use ultraviolet::Vec3;
 
 use super::{transform, *};
@@ -405,7 +404,7 @@ pub extern "C" fn rtWorldEnd() {
     let pixels = s.res.0 as u64 * s.res.1 as u64;
 
     let total = Timer::new();
-    let (build_time, render, mut budget, rgb) = {
+    let (build_time, render, budget, rgb) = {
         /* TODO: build (Workflow, steps 9 and 14): the light list (the delta
          * lights and the emissive draw calls' stand-ins) and the BVH over every
          * primitive. */
@@ -437,9 +436,6 @@ pub extern "C" fn rtWorldEnd() {
 
         (build_time, render, budget, screen.write())
     };
-    if o.progress {
-        budget.progress(pixels); /* --progress: a line every two seconds */
-    }
     budget.done(pixels);
     budget.finish();
     let render_time = render.seconds();

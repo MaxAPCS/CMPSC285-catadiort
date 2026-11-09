@@ -12,7 +12,7 @@ impl Light for DirectionalLight {
     fn rayto(&self, pos: Vec3) -> ShadowRay {
         ShadowRay {
             pos,
-            dir: self.dir,
+            dir: -self.dir,
             max_t: f32::INFINITY,
             irradiance: self.irradiance,
         }

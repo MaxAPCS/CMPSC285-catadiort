@@ -1,0 +1,384 @@
+{
+ "file": "D:\\Dropbox\\Research\\Projects\\GenerativePathTracing\\dataset\\Blender\\Random\\AtticCloseup\\AtticCloseup.blend",
+ "scene": "Scene",
+ "frame": 14,
+ "resolution": [
+  1920,
+  1080,
+  50
+ ],
+ "cameras": [
+  {
+   "name": "Camera.002",
+   "active": false,
+   "eye": [
+    0.18379,
+    2.04833,
+    0.34927
+   ],
+   "lookat": [
+    0.1814,
+    1.11475,
+    -0.0091
+   ],
+   "up": [
+    -0.00451,
+    0.35838,
+    -0.93356
+   ],
+   "fovy_deg": 28.842,
+   "lens_mm": 35.0,
+   "resolution": [
+    960,
+    540
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.001",
+   "active": false,
+   "eye": [
+    0.45817,
+    1.15984,
+    0.66674
+   ],
+   "lookat": [
+    -0.04007,
+    0.99399,
+    -0.18429
+   ],
+   "up": [
+    -0.08326,
+    0.98615,
+    -0.14343
+   ],
+   "fovy_deg": 28.842,
+   "lens_mm": 35.0,
+   "resolution": [
+    960,
+    540
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera",
+   "active": true,
+   "eye": [
+    0.1833,
+    1.85715,
+    0.27588
+   ],
+   "lookat": [
+    0.18091,
+    0.92357,
+    -0.08249
+   ],
+   "up": [
+    -0.00451,
+    0.35838,
+    -0.93356
+   ],
+   "fovy_deg": 28.842,
+   "lens_mm": 35.0,
+   "resolution": [
+    960,
+    540
+   ],
+   "type": "PERSP"
+  }
+ ],
+ "lights": [
+  {
+   "name": "Sun",
+   "type": "SUN",
+   "color": [
+    1.0,
+    0.7953,
+    0.5815
+   ],
+   "blender_energy": 100.0,
+   "pos": [
+    2.85439,
+    3.38395,
+    0.04865
+   ],
+   "dir": [
+    -0.71292,
+    -0.33888,
+    0.61392
+   ],
+   "hide_render": false,
+   "E_guess": [
+    100.0,
+    79.5307,
+    58.1537
+   ],
+   "angle_deg": 1.146
+  },
+  {
+   "name": "Point_light_02",
+   "type": "POINT",
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "blender_energy": 1.0,
+   "pos": [
+    0.48645,
+    0.91976,
+    -0.14609
+   ],
+   "dir": [
+    0.0,
+    -1.0,
+    -0.0
+   ],
+   "hide_render": false,
+   "I_guess": [
+    0.0796,
+    0.0796,
+    0.0796
+   ],
+   "radius": 0.10000000149011612
+  },
+  {
+   "name": "Point_light_01",
+   "type": "POINT",
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "blender_energy": 1.0,
+   "pos": [
+    0.01327,
+    0.99413,
+    0.03211
+   ],
+   "dir": [
+    0.0,
+    -1.0,
+    -0.0
+   ],
+   "hide_render": false,
+   "I_guess": [
+    0.0796,
+    0.0796,
+    0.0796
+   ],
+   "radius": 0.10000000149011612
+  }
+ ],
+ "world": {
+  "name": "World",
+  "nodes": [
+   {
+    "type": "OUTPUT_WORLD"
+   },
+   {
+    "type": "BACKGROUND",
+    "strength": 1.0
+   },
+   {
+    "type": "TEX_COORD"
+   },
+   {
+    "type": "MAPPING"
+   },
+   {
+    "type": "TEX_ENVIRONMENT",
+    "image": "//..\\..\\src\\saves (blender)\\textures\\parking_lot_hdri_2k.hdr"
+   }
+  ],
+  "view_transform": "Filmic",
+  "exposure": 0.6103897094726562
+ },
+ "static_obj": "attic.obj",
+ "static_triangles": 138406,
+ "prototypes": {},
+ "instanced_triangles": 0,
+ "sprinkles": 0,
+ "materials": {
+  "books_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/books_atlas_01.png",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "books_02": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/books_atlas_02.png",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "books_03": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/books_atlas_03.png",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "box_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/box_01_box_01.jpg",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "coin_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/coins_01.png",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "coin_02": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/coins_01_coin_02.jpg",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "curtain_01": {
+   "Kd": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.0
+  },
+  "glass_01": {
+   "Kd": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ks": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "Ns": 48826.125,
+   "Ni": 1.45,
+   "Tr": 0.95
+  },
+  "key_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/key_bake_01_key_01.jpg",
+   "Ks": [
+    0.4000000059604645,
+    0.4000000059604645,
+    0.4000000059604645
+   ],
+   "Ns": 37.751937092728284,
+   "Ni": 1.5
+  },
+  "metal_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/lamp_bake_01.png",
+   "Ks": [
+    0.3831249848008156,
+    0.3831249848008156,
+    0.3831249848008156
+   ],
+   "Ns": 37.751937092728284,
+   "Ni": 1.5
+  },
+  "pencil_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/pencils_bake_01_pencil_01.jpg",
+   "Ks": [
+    0.09600000143051148,
+    0.09600000143051148,
+    0.09600000143051148
+   ],
+   "Ns": 31.674288283325865,
+   "Ni": 1.5
+  },
+  "wood_01": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/wood_01.jpg",
+   "Ks": [
+    0.4000000059604645,
+    0.4000000059604645,
+    0.4000000059604645
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  }
+ },
+ "seconds": 20.1
+}

@@ -465,7 +465,9 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                 usage(tables);
                 std::process::exit(0);
             }
-            "--progress" => o.progress = true,
+            "--progress" => panic!(
+                "--progress is not supported— catadiort's parallel structure makes it impossible to tell when a certain pixel is done."
+            ),
             "--frames" => {
                 let v = value_of(args, &mut i, a);
                 let (first, last) = match v.split_once('-') {
@@ -554,6 +556,11 @@ pub fn parse_command_line(args: &[String], tables: &[SceneTable]) -> String {
         usage(tables);
         std::process::exit(1);
     };
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(o.threads)
+        .build_global()
+        .unwrap();
     scene
 }
 

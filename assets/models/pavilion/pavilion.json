@@ -1,0 +1,611 @@
+{
+ "file": "D:\\Dropbox\\Research\\Projects\\GenerativePathTracing\\dataset\\Blender\\Scenes\\BarcelonaPavillion\\BarcelonaPavillion.blend",
+ "scene": "1- time: midday",
+ "frame": 4,
+ "resolution": [
+  1280,
+  720,
+  100
+ ],
+ "cameras": [
+  {
+   "name": "Camera.001",
+   "active": false,
+   "eye": [
+    10.34567,
+    2.34273,
+    1.05823
+   ],
+   "lookat": [
+    9.44942,
+    2.34273,
+    1.50177
+   ],
+   "up": [
+    0.0,
+    1.0,
+    -0.0
+   ],
+   "fovy_deg": 45.747,
+   "lens_mm": 24.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.006",
+   "active": false,
+   "eye": [
+    0.75827,
+    2.72838,
+    8.30207
+   ],
+   "lookat": [
+    1.73655,
+    2.72838,
+    8.09483
+   ],
+   "up": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "fovy_deg": 45.747,
+   "lens_mm": 24.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.005",
+   "active": false,
+   "eye": [
+    -15.98426,
+    1.33648,
+    8.19289
+   ],
+   "lookat": [
+    -15.06983,
+    1.33648,
+    7.78815
+   ],
+   "up": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "fovy_deg": 20.408,
+   "lens_mm": 50.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.004",
+   "active": false,
+   "eye": [
+    -3.73558,
+    2.37285,
+    3.43107
+   ],
+   "lookat": [
+    -2.90922,
+    2.34525,
+    2.8686
+   ],
+   "up": [
+    0.02282,
+    0.99962,
+    -0.01552
+   ],
+   "fovy_deg": 28.842,
+   "lens_mm": 35.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.003",
+   "active": false,
+   "eye": [
+    23.97862,
+    1.42912,
+    12.78003
+   ],
+   "lookat": [
+    23.26433,
+    1.54488,
+    13.47024
+   ],
+   "up": [
+    0.08991,
+    0.99323,
+    -0.07354
+   ],
+   "fovy_deg": 28.842,
+   "lens_mm": 35.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera.002",
+   "active": false,
+   "eye": [
+    -17.01411,
+    1.6628,
+    11.47985
+   ],
+   "lookat": [
+    -17.01308,
+    1.67875,
+    10.47997
+   ],
+   "up": [
+    -2e-05,
+    0.99987,
+    0.01595
+   ],
+   "fovy_deg": 31.417,
+   "lens_mm": 36.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  },
+  {
+   "name": "Camera",
+   "active": true,
+   "eye": [
+    -22.16686,
+    1.97672,
+    9.44398
+   ],
+   "lookat": [
+    -21.21184,
+    1.97672,
+    9.14742
+   ],
+   "up": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "fovy_deg": 31.417,
+   "lens_mm": 36.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "type": "PERSP"
+  }
+ ],
+ "lights": [
+  {
+   "name": "Lamp.000",
+   "type": "SUN",
+   "color": [
+    1.0,
+    0.8437,
+    0.6928
+   ],
+   "blender_energy": 3.5,
+   "pos": [
+    12.77929,
+    16.2287,
+    2.10729
+   ],
+   "dir": [
+    -0.27631,
+    -0.82147,
+    -0.49883
+   ],
+   "hide_render": false,
+   "E_guess": [
+    3.5,
+    2.953,
+    2.4248
+   ],
+   "angle_deg": 11.421
+  }
+ ],
+ "world": {
+  "name": "mid day",
+  "nodes": [
+   {
+    "type": "BACKGROUND",
+    "strength": 1.0
+   },
+   {
+    "type": "MIX_SHADER"
+   },
+   {
+    "type": "TEX_SKY",
+    "sky_type": "PREETHAM",
+    "sun_elevation_deg": 90.0,
+    "sun_rotation_deg": 0.0,
+    "sun_intensity": 1.0
+   },
+   {
+    "type": "OUTPUT_WORLD"
+   },
+   {
+    "type": "BACKGROUND",
+    "strength": 1.0
+   },
+   {
+    "type": "CURVE_RGB"
+   },
+   {
+    "type": "TEX_COORD"
+   },
+   {
+    "type": "MAPPING"
+   },
+   {
+    "type": "TEX_IMAGE"
+   }
+  ],
+  "view_transform": "Standard",
+  "exposure": 0.0
+ },
+ "static_obj": "pavilion.obj",
+ "static_triangles": 125223,
+ "prototypes": {
+  "lotus_leaf_m.002.obj": {
+   "triangles": 2586,
+   "instances": 74
+  },
+  "lotus_leaf_l.002.obj": {
+   "triangles": 2586,
+   "instances": 82
+  },
+  "lotus_leaf_s.002.obj": {
+   "triangles": 3494,
+   "instances": 71
+  },
+  "lotus_flower.002.obj": {
+   "triangles": 5570,
+   "instances": 73
+  },
+  "pebbles.002.obj": {
+   "triangles": 48,
+   "instances": 6704
+  },
+  "pebbles.obj": {
+   "triangles": 48,
+   "instances": 6645
+  },
+  "pebbles.001.obj": {
+   "triangles": 48,
+   "instances": 6651
+  },
+  "tree_scatter.obj": {
+   "triangles": 113022,
+   "instances": 164
+  }
+ },
+ "instanced_triangles": 20553708,
+ "sprinkles": 0,
+ "materials": {
+  "black_glossy": {
+   "Kd": [
+    0.02,
+    0.02,
+    0.02
+   ],
+   "Ks": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "Ns": 400,
+   "Ni": 1.5
+  },
+  "concrete": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/Mies-BCN_M121_concrete.jpg",
+   "Ks": [
+    0.09600000143051148,
+    0.09600000143051148,
+    0.09600000143051148
+   ],
+   "Ns": 31.674288283325865,
+   "Ni": 1.5
+  },
+  "glass_architectural": {
+   "Kd": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ks": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "Ns": 5000,
+   "Ni": 1.5,
+   "Tr": 0.9
+  },
+  "grass": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/grass_mid_seamless_grass.jpg",
+   "Ks": [
+    0.4000000059604645,
+    0.4000000059604645,
+    0.4000000059604645
+   ],
+   "Ns": 37.751937092728284,
+   "Ni": 1.5
+  },
+  "leafs": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/tree_leafs.png",
+   "Ks": [
+    0.09600000143051148,
+    0.09600000143051148,
+    0.09600000143051148
+   ],
+   "Ns": 31.674288283325865,
+   "Ni": 1.5,
+   "map_d": "textures/tree_leafs_mask.png"
+  },
+  "leather_white": {
+   "Kd": [
+    0.88,
+    0.88,
+    0.88
+   ],
+   "Ks": [
+    0.12,
+    0.12,
+    0.12
+   ],
+   "Ns": 31.67428730753472,
+   "Ni": 1.5
+  },
+  "marble": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/Mies-BCN_M01.jpg",
+   "Ks": [
+    0.12,
+    0.12,
+    0.12
+   ],
+   "Ns": 30,
+   "Ni": 1.5
+  },
+  "marmol verde": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/Mies-BCN_M11.jpg",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "Material": {
+   "Kd": [
+    0.800000011920929,
+    0.800000011920929,
+    0.800000011920929
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "metal": {
+   "Kd": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ks": [
+    0.85,
+    0.85,
+    0.85
+   ],
+   "Ns": 800,
+   "Ni": 1.5,
+   "Pm": 1.0
+  },
+  "pavet": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/Mies-BCN_M081.jpg",
+   "Ks": [
+    0.12,
+    0.12,
+    0.12
+   ],
+   "Ns": 30,
+   "Ni": 1.5
+  },
+  "pebbles": {
+   "Kd": [
+    0.356600866317749,
+    0.368196816444397,
+    0.3030603981018066
+   ],
+   "Ks": [
+    0.07231369614601135,
+    0.07310432910919189,
+    0.06866320967674255
+   ],
+   "Ns": 31.674288283325865,
+   "Ni": 1.5
+  },
+  "pebbles.ground": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/rocks.jpg",
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "trunk": {
+   "Kd": [
+    0.21960784494876862,
+    0.1764705926179886,
+    0.09803921729326248
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "water": {
+   "Kd": [
+    0.04,
+    0.1,
+    0.11
+   ],
+   "Ks": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "Ns": 3000,
+   "Ni": 1.33,
+   "Tr": 0.65
+  },
+  "white_lotus": {
+   "Kd": [
+    0.9000000059604645,
+    0.9000000059604645,
+    0.9000000059604645
+   ],
+   "Ks": [
+    0.07999999642372124,
+    0.07999999642372124,
+    0.07999999642372124
+   ],
+   "Ns": 31.38776521588244,
+   "Ni": 1.5
+  },
+  "white_lotus_leafs": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/lotus.jpg",
+   "Ks": [
+    0.09600000143051148,
+    0.09600000143051148,
+    0.09600000143051148
+   ],
+   "Ns": 45.915525524128604,
+   "Ni": 1.5
+  },
+  "white_lotus_orange": {
+   "Kd": [
+    1.0,
+    0.7146464139223099,
+    0.0
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "white_mat": {
+   "Kd": [
+    0.800000011920929,
+    0.800000011920929,
+    0.800000011920929
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  },
+  "wood": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "map_Kd": "textures/wood.jpg",
+   "Ks": [
+    0.09600000143051148,
+    0.09600000143051148,
+    0.09600000143051148
+   ],
+   "Ns": 31.674288283325865,
+   "Ni": 1.5
+  },
+  "default": {
+   "Kd": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 30.0,
+   "Ni": 1.5
+  }
+ },
+ "seconds": 15.6
+}

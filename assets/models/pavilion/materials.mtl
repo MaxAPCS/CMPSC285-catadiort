@@ -1,0 +1,140 @@
+# written by tools/blender2obj.py
+
+newmtl black_glossy
+Kd 0.0200 0.0200 0.0200
+Ks 0.4000 0.4000 0.4000
+Ns 400.0000
+Ni 1.5000
+
+newmtl concrete
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 31.6743
+Ni 1.5000
+map_Kd textures/Mies-BCN_M121_concrete.jpg
+
+newmtl glass_architectural
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 5000.0000
+Ni 1.5000
+Tr 0.9000
+
+newmtl grass
+Kd 0.8000 0.8000 0.8000
+Ks 0.4000 0.4000 0.4000
+Ns 37.7519
+Ni 1.5000
+map_Kd textures/grass_mid_seamless_grass.jpg
+
+newmtl leafs
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 31.6743
+Ni 1.5000
+map_Kd textures/tree_leafs.png
+map_d textures/tree_leafs_mask.png
+
+newmtl leather_white
+Kd 0.8800 0.8800 0.8800
+Ks 0.1200 0.1200 0.1200
+Ns 31.6743
+Ni 1.5000
+
+newmtl marble
+Kd 0.8000 0.8000 0.8000
+Ks 0.1200 0.1200 0.1200
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/Mies-BCN_M01.jpg
+
+newmtl marmol_verde
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/Mies-BCN_M11.jpg
+
+newmtl Material
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+
+newmtl metal
+Kd 0.0000 0.0000 0.0000
+Ks 0.8500 0.8500 0.8500
+Ns 800.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl pavet
+Kd 0.8000 0.8000 0.8000
+Ks 0.1200 0.1200 0.1200
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/Mies-BCN_M081.jpg
+
+newmtl pebbles
+Kd 0.3566 0.3682 0.3031
+Ks 0.0723 0.0731 0.0687
+Ns 31.6743
+Ni 1.5000
+
+newmtl pebbles.ground
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/rocks.jpg
+
+newmtl trunk
+Kd 0.2196 0.1765 0.0980
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+
+newmtl water
+Kd 0.0400 0.1000 0.1100
+Ks 1.0000 1.0000 1.0000
+Ns 3000.0000
+Ni 1.3300
+Tr 0.6500
+
+newmtl white_lotus
+Kd 0.9000 0.9000 0.9000
+Ks 0.0800 0.0800 0.0800
+Ns 31.3878
+Ni 1.5000
+
+newmtl white_lotus_leafs
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 45.9155
+Ni 1.5000
+map_Kd textures/lotus.jpg
+
+newmtl white_lotus_orange
+Kd 1.0000 0.7146 0.0000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+
+newmtl white_mat
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+
+newmtl wood
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 31.6743
+Ni 1.5000
+map_Kd textures/wood.jpg
+
+newmtl default
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000

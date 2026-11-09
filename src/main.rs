@@ -60,3 +60,19 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(any(
+    feature = "aovraydir",
+    feature = "aovdepth",
+    feature = "aovnormal",
+    feature = "aovalbedo"
+))]
+const _: () = {
+    let count = cfg!(feature = "aovraydir") as u8
+        + cfg!(feature = "aovdepth") as u8
+        + cfg!(feature = "aovnormal") as u8
+        + cfg!(feature = "aovalbedo") as u8;
+    if count > 1 {
+        panic!("at most one of the `aov*` features may be enabled at a time");
+    }
+};

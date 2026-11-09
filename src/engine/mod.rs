@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use ultraviolet::Vec3;
+use ultraviolet::{Vec3, Vec3x4};
+use wide::f32x4;
 
 use crate::api::{RtMaterial, RtShadeContext, RtShaderFn};
 
@@ -13,7 +14,7 @@ pub(crate) use object::*;
 pub(crate) use screen::*;
 pub(crate) use world::*;
 
-const RECAST_EPSILON: f32 = 10e-4;
+const RECAST_EPSILON: f32 = 1e-4;
 const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
 const DEPTH_COMPLEXITY: usize = 4;
 
@@ -71,15 +72,14 @@ impl Material {
     }
 
     #[inline]
-    fn fresnelx4(&self, air_cos: wide::f32x4) -> wide::f32x4 {
+    fn fresnelx4(&self, medium_cos: wide::f32x4) -> Vec3x4 {
         if self.ior == world::MEDIUM_IOR {
-            return wide::f32x4::ZERO;
+            return Vec3x4::zero();
         }
-        let f0 = (self.ior - world::MEDIUM_IOR) / (self.ior + world::MEDIUM_IOR);
-        let f0 = f0 * f0;
-        let t = 1. - air_cos;
+        let f0 = Vec3x4::splat(self.specular);
+        let t = f32x4::ONE - medium_cos;
         let t2 = t * t;
-        f0 + (1. - f0) * (t2 * t2 * t)
+        f0 + (Vec3x4::one() - f0) * Vec3x4::broadcast(t2 * t2 * t)
     }
 
     fn shade(
@@ -99,9 +99,6 @@ impl Material {
             return (wnorm, self.into());
         };
         let mut material: RtMaterial = self.into();
-        if let Some(color) = color {
-            material.albedo = color;
-        }
         let mut ctx = RtShadeContext::new(
             &self.shaderparams,
             wpos,
@@ -115,7 +112,10 @@ impl Material {
             material,
         );
         unsafe { shader(&mut ctx) };
-        (ctx.N.into(), ctx.m)
+        if let Some(color) = color {
+            ctx.m.albedo = color;
+        };
+        (ctx.N, ctx.m)
     }
 
     pub(crate) const fn from(
@@ -171,7 +171,6 @@ impl RtMaterial {
         }
         (1. - self.transmission) * self.albedo * (ambient + diffuse / core::f32::consts::PI)
             + self.specular * specular
-            + self.emission
     }
 }
 

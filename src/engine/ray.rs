@@ -1,11 +1,9 @@
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use ultraviolet::{Mat4, Mat4x4, Vec3, Vec3x4, Vec4, Vec4x4};
 use wide::{CmpGt, CmpLt, f32x4, u32x4};
 
 use super::DEPTH_COMPLEXITY;
 use super::Material;
 use super::object::Primitive;
-use super::wider;
 use crate::api::RtMaterial;
 
 pub(super) struct Rayx4 {
@@ -116,28 +114,25 @@ impl Hitx4 {
 
         let mut out_norms = [Vec3::zero(); 4];
         let mut out_matrs = [const { core::mem::MaybeUninit::uninit() }; 4];
-        IndexedParallelIterator::zip_eq(out_norms.par_iter_mut(), out_matrs.par_iter_mut())
-            .enumerate()
-            .for_each(|(i, (out_norms, out_matrs))| {
-                let color = if color[i].x.is_nan() {
+        for i in 0..4 {
+            let (norm, matr) = material.shade(
+                wpos[i],
+                wdir[i],
+                wnorm[i],
+                t[i],
+                opos[i],
+                norm[i],
+                (u[i], v[i]),
+                if color[i].x.is_nan() {
                     None
                 } else {
                     Some(color[i])
-                };
-                let (norm, matr) = material.shade(
-                    wpos[i],
-                    wdir[i],
-                    wnorm[i],
-                    t[i],
-                    opos[i],
-                    norm[i],
-                    (u[i], v[i]),
-                    color,
-                    depth,
-                );
-                *out_norms = norm;
-                out_matrs.write(matr);
-            });
+                },
+                depth,
+            );
+            out_norms[i] = norm;
+            out_matrs[i].write(matr);
+        }
         (out_norms.into(), unsafe { core::mem::transmute(out_matrs) })
     }
 
@@ -148,7 +143,13 @@ impl Hitx4 {
 
     #[inline]
     pub fn refract(&self, material: &Material) -> (f32x4, Vec3x4) {
-        refractedx4(self.wdir.normalized(), self.norm, material.ior.into())
+        let entering = self.wdir.dot(self.wnorm).cmp_lt(f32x4::ZERO);
+        refractedx4(
+            self.wdir.normalized(),
+            self.norm,
+            material.ior.into(),
+            entering,
+        )
     }
 }
 
@@ -157,23 +158,17 @@ impl Hitx4 {
 /// - norm: normalized, away from surface
 /// - eta: object ior / medium ior
 /// Returns:
-/// - air_cos: cosine from dir to norm, flipped to air side
-/// - odir: normalized
+/// - medium_cos: cosine between dir to norm on medium side
+/// - odir: NaN if TIR, normalized
 #[inline]
-fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4) -> (f32x4, Vec3x4) {
-    let ondi = norm.dot(dir);
-
-    let flip = ondi.cmp_gt(f32x4::ZERO);
-    let ndi = flip.blend(-ondi, ondi);
-    let norm = Vec3x4::blend(flip, -norm, norm);
-    let eta = flip.blend(eta, eta.recip());
-
+fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4, Vec3x4) {
+    let ndi = norm.dot(dir);
+    let eta = entering.blend(eta.recip(), eta);
     let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
-    let tir = k.cmp_lt(f32x4::ZERO);
-    let out = dir.mul_add(Vec3x4::broadcast(eta), -(eta * ndi + k.sqrt()) * norm);
+    let sqrtk = k.sqrt(); // medium side cos, or NaN on TIR
     (
-        flip.blend(k.sqrt(), -ondi),
-        Vec3x4::blend(tir, const { Vec3x4::broadcast(wider::f32x4_NAN) }, out),
+        entering.blend(-ndi, sqrtk),
+        dir.mul_add(Vec3x4::broadcast(eta), -(eta * ndi + sqrtk) * norm),
     )
 }
 

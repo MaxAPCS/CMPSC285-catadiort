@@ -86,22 +86,22 @@ pub(super) fn get() -> Mat4 {
     first.map_or(c.current.m, |k| k.m)
 }
 
-/// The poses of the CTM at the times of the motion blocks at this level,
-/// in the order opened.
-pub fn ctm_keys() -> Vec<MotionKey> {
-    CTM.lock().unwrap().current.keys.clone()
-}
+// /// The poses of the CTM at the times of the motion blocks at this level,
+// /// in the order opened.
+// pub fn ctm_keys() -> Vec<MotionKey> {
+//     CTM.lock().unwrap().current.keys.clone()
+// }
 
-/// The time of the block that is open, or -1 outside any block (rtCamera
-/// keys the camera by it).
-pub fn ctm_motion_time() -> f32 {
-    let c = CTM.lock().unwrap();
-    if c.editing != usize::MAX {
-        c.current.keys[c.editing].time
-    } else {
-        -1.0
-    }
-}
+// /// The time of the block that is open, or -1 outside any block (rtCamera
+// /// keys the camera by it).
+// pub fn ctm_motion_time() -> f32 {
+//     let c = CTM.lock().unwrap();
+//     if c.editing != usize::MAX {
+//         c.current.keys[c.editing].time
+//     } else {
+//         -1.0
+//     }
+// }
 
 pub(super) fn clear() {
     let mut c = CTM.lock().unwrap();

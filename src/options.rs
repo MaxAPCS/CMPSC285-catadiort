@@ -54,7 +54,6 @@ pub struct Options {
                      ao) and refuses another; "": the beauty image */
     pub trace_x: u32, /* --trace X Y: the pixel whose rays the renderer logs (debug.rs); -1: none */
     pub trace_y: u32,
-    pub progress: bool, /* --progress: a line on stderr every two seconds while rendering (timer.rs) */
     pub frame_first: i32, /* --frames A-B: render frames A to B of a movie only (the worlds since rtBegin,
                           from 0); -1: every frame */
     pub frame_last: i32,
@@ -97,7 +96,6 @@ impl Options {
             aov: String::new(),
             trace_x: u32::MAX,
             trace_y: u32::MAX,
-            progress: false,
             frame_first: -1,
             frame_last: -1,
             lens: -1.0,

@@ -3,7 +3,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelI
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec3, Vec3x4};
 use wide::u32x4;
-use wide::{CmpGe, CmpGt, CmpLt, CmpNe, f32x4, f64x4};
+use wide::{CmpGe, CmpLt, CmpNe, f32x4, f64x4};
 
 use super::Primitive;
 use super::ray;
@@ -35,6 +35,11 @@ impl Primitive for Sphere {
         let half = Vec3::new(ex, ey, ez);
 
         (center - half, center + half)
+    }
+
+    #[inline]
+    fn centroid(&self) -> Vec3 {
+        self.wotrans.inversed().extract_translation()
     }
 
     fn cutout(
@@ -130,7 +135,7 @@ impl Primitive for Sphere {
         }
 
         let opos1 = ropos + rodir * t1;
-        if (t1 >= 0.)
+        if (t1 > 0.)
             & self.cutout(
                 ray.pos + ray.dir * t1,
                 ray.dir,
@@ -150,7 +155,7 @@ impl Primitive for Sphere {
         let t2 = (-b + discrim.sqrt()) / a;
 
         let opos2 = ropos + rodir * t2;
-        (t2 >= 0. && t2 <= ray.max_t)
+        (t2 > 0. && t2 <= ray.max_t)
             & self.cutout(
                 ray.pos + ray.dir * t2,
                 ray.dir,
@@ -193,7 +198,7 @@ impl Primitive for Sphere {
                 wdir: rays.dir,
                 wnorm,
                 t: t1,
-                norm: Vec3x4::blend(rodir.dot(opos1).cmp_gt(f32x4::ZERO), -wnorm, wnorm),
+                norm: wnorm,
                 uv: uv1,
                 color: Vec3x4::broadcast(wider::f32x4_NAN),
                 material: (self.material as u32).into(),
@@ -224,7 +229,7 @@ impl Primitive for Sphere {
             wdir: rays.dir,
             wnorm,
             t,
-            norm: Vec3x4::blend(rodir.dot(opos).cmp_gt(f32x4::ZERO), -wnorm, wnorm),
+            norm: wnorm,
             uv: Self::uvx4(opos),
             color: Vec3x4::broadcast(wider::f32x4_NAN),
             material: (self.material as u32).into(),
@@ -233,11 +238,6 @@ impl Primitive for Sphere {
 }
 
 impl Sphere {
-    #[inline]
-    pub fn extract_translation(&self) -> Vec3 {
-        self.wotrans.inversed().extract_translation()
-    }
-
     #[inline]
     pub fn extract_avg_scale_sq(&self) -> f32 {
         let inv3 = self.wotrans.inversed().truncate();

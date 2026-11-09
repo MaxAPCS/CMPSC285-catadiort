@@ -9,16 +9,15 @@ use crate::utils::texture;
 pub const MEDIUM_IOR: f32 = 1.0;
 
 pub(crate) struct World {
+    pub materials: smallvec::SmallVec<[Material; 4]>,
     pub spheres: Vec<object::Sphere>,
     pub meshes: Vec<object::Mesh>,
     pub pointlights: Vec<object::PointLight>,
+    pub planelights: Vec<object::PlaneLight>,
     pub directionallights: Vec<object::DirectionalLight>,
     pub spotlights: Vec<object::SpotLight>,
 
-    pub materials: smallvec::SmallVec<[Material; 4]>,
-
     pub ambientcolor: Vec3,
-
     pub environmentcolor: Vec3,
     pub environmenttex: i32,
     pub environmentscale: f32,
@@ -29,21 +28,20 @@ impl World {
     #[inline]
     pub const fn empty() -> Self {
         Self {
-            spheres: Vec::new(),
-            meshes: Vec::new(),
-            pointlights: Vec::new(),
-            directionallights: Vec::new(),
-            spotlights: Vec::new(),
-
             materials: unsafe {
                 smallvec::SmallVec::from_const_with_len_unchecked(
                     [const { Material::default() }; 4],
                     1,
                 )
             },
+            spheres: Vec::new(),
+            meshes: Vec::new(),
+            pointlights: Vec::new(),
+            planelights: Vec::new(),
+            directionallights: Vec::new(),
+            spotlights: Vec::new(),
 
             ambientcolor: Vec3::broadcast(0.),
-
             environmentcolor: Vec3::broadcast(0.),
             environmenttex: -1,
             environmentscale: 1.,
@@ -56,7 +54,7 @@ impl World {
         // pass
     }
 
-    pub(super) fn intersect<'a>(self: &'a Self, rays: &mut ray::Rayx4, depth: u16) {
+    pub(super) fn intersect(&self, rays: &mut ray::Rayx4, depth: u16) {
         for s in &self.spheres {
             rays.intersect(s, depth)
         }
@@ -65,7 +63,7 @@ impl World {
         }
     }
 
-    pub(super) fn shadow<'a>(self: &'a Self, rays: &mut ray::ShadowRay, depth: u16) {
+    pub(super) fn shadow(&self, rays: &mut ray::ShadowRay, depth: u16) {
         for s in &self.spheres {
             if rays.intersect(s, depth) {
                 return;
@@ -82,9 +80,12 @@ impl World {
         core::iter::chain(
             core::iter::chain(
                 self.pointlights.iter().map(move |l| l.rayto(point)),
-                self.directionallights.iter().map(move |l| l.rayto(point)),
+                self.planelights.iter().map(move |l| l.rayto(point)),
             ),
-            self.spotlights.iter().map(move |l| l.rayto(point)),
+            core::iter::chain(
+                self.directionallights.iter().map(move |l| l.rayto(point)),
+                self.spotlights.iter().map(move |l| l.rayto(point)),
+            ),
         )
     }
 

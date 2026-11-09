@@ -1,4 +1,7 @@
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGt, f32x4};
 
@@ -8,6 +11,7 @@ use super::world;
 use super::{RECAST_EPSILON, RECAST_EPSILON_X4};
 #[cfg(debug_assertions)]
 use crate::rt_trace;
+#[cfg(debug_assertions)]
 use crate::utils::debug::vec3_display;
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
@@ -177,7 +181,7 @@ impl Screen {
                 srchits.push((idxs[i], wghs[i], hit));
             }
         });
-        srchits.sort_unstable_by_key(|l| l.2.material);
+        srchits.par_sort_unstable_by_key(|l| l.2.material);
 
         // Group Source Hits
         let srchitx4s_est = srchits.len() * 3 / 10;
@@ -223,9 +227,9 @@ impl Screen {
                     continue;
                 }
                 let shadowrays: Vec<_> = world
-                    .shadowrays(wpos[i] + wnorm[i] * RECAST_EPSILON)
+                    .shadowrays(wpos[i])
                     .filter_map(|mut sr| {
-                        if sr.dir.dot(wnorm[i]) <= 0.0 {
+                        if sr.dir.dot(norma[i]) <= 0.0 {
                             #[cfg(debug_assertions)]
                             {
                                 rt_trace!(
@@ -237,14 +241,15 @@ impl Screen {
                             }
                             return None;
                         }
+                        sr.pos += wider::copysign(norma[i] * RECAST_EPSILON, sr.dir);
                         world.shadow(&mut sr, depth);
                         Some(sr)
                     })
                     .collect();
                 contribs[i] =
                     matrs[i].color(shadowrays.as_slice(), norma[i], wdir[i], world.ambientcolor);
-                if wnorm[i].dot(wdir[i]) < 0. {
-                    contribs[i] += material.emission
+                if wnorm[i].dot(wdir[i]) < 0. || material.emission == Vec3::zero() {
+                    contribs[i] += matrs[i].emission;
                 }
             }
             hits.norm = norm; // write back shader norms
@@ -288,11 +293,7 @@ impl Screen {
                             twgh,
                             ray::Rayx4::new(
                                 hits.wpos
-                                    + Vec3x4::blend(
-                                        hits.wnorm.dot(reflectdir).cmp_gt(f32x4::ZERO),
-                                        hits.wnorm,
-                                        -hits.wnorm,
-                                    ) * RECAST_EPSILON_X4,
+                                    + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
                                 reflectdir,
                             ),
                         ))
@@ -300,20 +301,19 @@ impl Screen {
                 }
                 if material.refracts() {
                     let (ndi, refractdir) = hits.refract(material);
-                    let reflectwgh =
-                        f32x4::blend(refractdir.x.is_nan(), f32x4::ONE, material.fresnelx4(ndi));
+                    let reflectwgh = Vec3x4::blend(
+                        refractdir.x.is_nan(),
+                        Vec3x4::one(),
+                        material.fresnelx4(ndi),
+                    );
                     let reflectdir = hits.reflect();
 
                     children.push((
                         idxs,
-                        wghs * Vec3x4::splat(material.specular) * reflectwgh,
+                        wghs * reflectwgh,
                         ray::Rayx4::new(
                             hits.wpos
-                                + Vec3x4::blend(
-                                    hits.wnorm.dot(reflectdir).cmp_gt(f32x4::ZERO),
-                                    hits.wnorm,
-                                    -hits.wnorm,
-                                ) * RECAST_EPSILON_X4,
+                                + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
                             reflectdir,
                         ),
                     ));
@@ -321,16 +321,11 @@ impl Screen {
                     if !refractdir.x.is_nan().all() {
                         children.push((
                             idxs,
-                            wghs * Vec3x4::broadcast(
-                                material.transmission * (f32x4::ONE - reflectwgh),
-                            ),
+                            wghs * (Vec3x4::one() - reflectwgh)
+                                * f32x4::splat(material.transmission),
                             ray::Rayx4::new(
                                 hits.wpos
-                                    + Vec3x4::blend(
-                                        hits.wnorm.dot(refractdir).cmp_gt(f32x4::ZERO),
-                                        hits.wnorm,
-                                        -hits.wnorm,
-                                    ) * RECAST_EPSILON_X4,
+                                    + wider::copysignx4(hits.wnorm, refractdir) * RECAST_EPSILON_X4,
                                 refractdir,
                             ),
                         ));
@@ -346,6 +341,7 @@ impl Screen {
         dst.shrink_to_fit();
     }
 
+    #[allow(unused_variables, unused_mut)]
     fn _aov(&mut self, world: &world::World) {
         self.raysone.par_iter_mut().for_each(|(_, _, rays)| {
             world.intersect(rays, 0);
@@ -375,8 +371,9 @@ impl Screen {
                 if let Some(hits) = rays.get() {
                     let material = hits.material.as_array_ref();
                     let color: [Vec3; 4] = hits.color.into();
+                    let t = hits.t.as_array_ref();
                     for i in 0..4 {
-                        if color[i].x.is_nan() {
+                        if color[i].x.is_nan() && !t[i].is_nan() {
                             out[i] = (world.materials[material[i] as usize]).albedo.into();
                         } else {
                             out[i] = color[i];

@@ -2,7 +2,10 @@ use std::sync::{Arc, Mutex};
 use ultraviolet::{Mat4, Vec3};
 
 use super::{transform, *};
-use crate::engine::{DirectionalLight, Material, Mesh, PointLight, Sphere, SpotLight, World};
+use crate::engine::{
+    DirectionalLight, Material, Mesh, MeshEmissive, PointLight, Sphere, SpotLight, World,
+    from_emissive,
+};
 
 pub(crate) struct WorldState {
     pub shader: Option<unsafe extern "C" fn(*mut RtShadeContext)>,
@@ -205,7 +208,6 @@ pub unsafe extern "C" fn rtTriangleMesh(
         println!("rtobject: skipped rtTriangleMesh with nverts {}", nverts);
         return;
     }
-
     let nverts = nverts as usize;
     let p = unsafe { core::slice::from_raw_parts(p, nverts) }.to_vec();
     let n = if n.is_null() {
@@ -229,5 +231,10 @@ pub unsafe extern "C" fn rtTriangleMesh(
 
     let mut os = OBJECTSTATE.lock().unwrap();
     let obj = Mesh::create(&mut os, ctm, indices, p, n, cs, st);
+    match from_emissive(&obj, &os.get_material()) {
+        Some(MeshEmissive::Plane(pl)) => os.world.planelights.push(pl),
+        Some(MeshEmissive::Point(pl)) => os.world.pointlights.push(pl),
+        None => {}
+    }
     os.world.meshes.push(obj);
 }

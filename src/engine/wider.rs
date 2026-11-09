@@ -1,5 +1,5 @@
-use ultraviolet::{DVec3x4, DVec4x4, Mat4, Mat4x4, Vec3x4, Vec3x8, Vec4x4, Vec4x8};
-use wide::{f32x4, f32x8, f64x4, i32x4, u32x4};
+use ultraviolet::{DVec3x4, DVec4x4, Mat4, Mat4x4, Vec3, Vec3x4, Vec3x8, Vec4x4, Vec4x8};
+use wide::{CmpGt, f32x4, f32x8, f64x4, i32x4, u32x4};
 
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
@@ -103,12 +103,22 @@ pub fn Mat4x4_splat(mat4: &Mat4) -> Mat4x4 {
 }
 
 #[inline]
+pub fn copysign(vec: Vec3, sign: Vec3) -> Vec3 {
+    if vec.dot(sign) > 0. { vec } else { -vec }
+}
+
+#[inline]
+pub fn copysignx4(vec: Vec3x4, sign: Vec3x4) -> Vec3x4 {
+    Vec3x4::blend(vec.dot(sign).cmp_gt(f32x4::ZERO), vec, -vec)
+}
+
+#[inline]
 pub fn cast_f32x4(a: u32x4) -> f32x4 {
     f32x4::from_i32x4(bytemuck::cast::<u32x4, i32x4>(a))
 }
 
 #[inline]
-fn cast_d(a: Vec3x4) -> DVec3x4 {
+pub fn cast_d(a: Vec3x4) -> DVec3x4 {
     DVec3x4::from(a.as_array().map(cast_f64))
 }
 
@@ -125,6 +135,17 @@ fn cast_f64(a: f32x4) -> f64x4 {
 #[inline]
 pub fn cast_f32(a: f64x4) -> f32x4 {
     f32x4::from(a.as_array_ref().map(|x| x as _))
+}
+
+#[inline]
+pub fn cast_m32(a: f64x4) -> f32x4 {
+    let bits = a.move_mask();
+    f32x4::from([
+        f32::from_bits(if bits & 1 != 0 { u32::MAX } else { 0 }),
+        f32::from_bits(if bits & 2 != 0 { u32::MAX } else { 0 }),
+        f32::from_bits(if bits & 4 != 0 { u32::MAX } else { 0 }),
+        f32::from_bits(if bits & 8 != 0 { u32::MAX } else { 0 }),
+    ])
 }
 
 pub struct Accum4<T, U> {
@@ -168,14 +189,14 @@ impl<T, U> Accum4<T, U> {
         )
     }
 
-    pub fn peek(&self) -> Option<(u32, T, U)> {
+    pub fn peek(&self) -> Option<(u32, &T, &U)> {
         if self.n == 0 {
             None
         } else {
             Some((
                 self.idxs[self.n - 1],
-                unsafe { self.ones[self.n - 1].assume_init_read() },
-                unsafe { self.twos[self.n - 1].assume_init_read() },
+                unsafe { self.ones[self.n - 1].assume_init_ref() },
+                unsafe { self.twos[self.n - 1].assume_init_ref() },
             ))
         }
     }

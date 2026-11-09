@@ -1,0 +1,327 @@
+# written by tools/pbrt2obj.py
+
+newmtl default
+Kd 0.0000 0.0000 0.0000
+Ks 0.0000 0.0000 0.0000
+Ke 11.4145 9.7200 8.6149
+Ns 6.0000
+Ni 1.5000
+
+newmtl diffuse
+Kd 0.2000 0.2000 0.2000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl mitra_right_back
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl mitra_right_front
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl s_lily_gold_tray
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl socket_clamp
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl pearl
+Kd 0.6500 0.6000 0.6000
+Ks 0.0400 0.0400 0.0400
+Ns 1998.0000
+Ni 1.5000
+
+newmtl socket_clamp1
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_upper_arc
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_lower_arc
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl s_lily_ruby_socket
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl small_ruby
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 3.0000
+Tr 1.0000
+
+newmtl b_lily_tray
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl b_lily_arc
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base_bumped
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl diamond
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 3.0000
+Tr 1.0000
+
+newmtl bl_clamp_a
+Kd 0.5000 0.5000 0.5000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl zirkon
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 2.5000
+Tr 1.0000
+
+newmtl big_ruby
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 3.0000
+Tr 1.0000
+
+newmtl gold_tray
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 190.1599
+Ni 1.5000
+Pm 1.0000
+
+newmtl diamond_tray_normal_SPEC.
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 3.0000
+Tr 1.0000
+
+newmtl gold_tray_clamp
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl pearl_rosetta
+Kd 0.4500 0.4500 0.4000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl pearl_rosetta_tray_front_normal
+Kd 0.4500 0.4500 0.4000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl rosetta_fix
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl rosetta_fix_tray_front_normal
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl rosetta_deco
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl rosetta_deco_deco_mask.png
+Kd 0.5000 0.5000 0.5000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl gold_tray_front
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base_mitra_border.png
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl mitra_inlay
+Kd 0.5000 0.5000 0.5000
+Ks 0.0400 0.0400 0.0400
+Ns 190.1599
+Ni 1.5000
+map_Kd textures/mitra_border_color.png
+
+newmtl deco
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold.002
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl border_bott_inlay
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base_border
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base_border_mitra_border.png
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl gold_base_bumped_mitra_border.png.002
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl arc_zirk_socket_base
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl arc_rosetta_red
+Kd 0.5000 0.5000 0.5000
+Ks 0.0400 0.0400 0.0400
+Ns 190.1599
+Ni 1.5000
+map_Kd textures/mitra_border_color.png
+
+newmtl gold_base_mitra_border.png.002
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl cross_gold
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl cross_gold_cross_flower_mask.png
+Kd 0.0000 0.0000 0.0000
+Ks 0.9374 0.7763 0.4016
+Ns 319998.0000
+Ni 1.5000
+Pm 1.0000
+
+newmtl saphire
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 319998.0000
+Ni 3.0000
+Tr 1.0000
+
+newmtl cross_enamel
+Kd 0.8000 0.8000 0.8000
+Ks 0.0400 0.0400 0.0400
+Ns 17.2160
+Ni 1.5000
+
+newmtl crack
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 6.0000
+Ni 1.5000
+
+newmtl velvet
+Kd 0.0500 0.0050 0.0050
+Ks 0.0400 0.0400 0.0400
+Ns 18.0000
+Ni 1.5000
+
+newmtl dark_velvet
+Kd 0.0500 0.0050 0.0050
+Ks 0.0400 0.0400 0.0400
+Ns 17.2160
+Ni 1.5000

@@ -1,7 +1,9 @@
 target/
+Cargo.lock
 
 renders/
-
 reference_renders/
 
-Cargo.lock
+assets/models/fishycat
+assets/models/barbershop
+assets/models/sanmiguel

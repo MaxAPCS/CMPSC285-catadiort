@@ -26,7 +26,7 @@ macro_rules! rt_trace {
 
 #[inline]
 pub fn vec3_display(x: ultraviolet::Vec3) -> String {
-    x.as_array().map(|a| f32::to_string(&a)).join(",")
+    x.as_array().map(|a| f32::to_string(&a)).join(" ")
 }
 
 /* The --aov images, each a color from what the renderer has at the first

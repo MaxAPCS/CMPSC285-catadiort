@@ -1,0 +1,108 @@
+# written by tools/blender2obj.py
+
+newmtl birds1
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Birds4.jpg
+map_d textures/Birds4_mask.png
+
+newmtl birds1.001
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Birds.jpg
+map_d textures/Birds_mask.png
+
+newmtl birds1.002
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Birds5.jpg
+map_d textures/Birds5_mask.png
+
+newmtl birds1.003
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Birds4.jpg
+map_d textures/Birds4_mask.png
+
+newmtl Cloud
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Cloud.jpg
+map_d textures/Cloud_mask.png
+
+newmtl Cloud.001
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/Clouds2.jpg
+map_d textures/Clouds2_mask.png
+
+newmtl ship_wake
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/ship-wakes.jpg
+map_d textures/ship-wakes_mask.png
+
+newmtl ship_wake.002
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.4500
+map_Kd textures/ship-wakes2.jpg
+map_d textures/ship-wakes2_mask.png
+
+newmtl snow_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.0800 0.0800 0.0800
+Ns 20.0000
+Ni 1.4500
+map_Kd textures/snow_01_diff_2k.jpg
+map_Pr textures/snow_01_rough_2k.jpg
+norm textures/snow_01_nor_gl_2k.png
+
+newmtl snow_02
+Kd 0.8000 0.8000 0.8000
+Ks 0.0800 0.0800 0.0800
+Ns 20.0000
+Ni 1.4500
+map_Kd textures/snow_01_diff_2k.jpg
+map_Pr textures/snow_01_rough_2k.jpg
+norm textures/snow_01_nor_gl_2k.png
+
+newmtl water
+Kd 0.0100 0.1200 0.1800
+Ks 0.9000 0.9000 0.9000
+Ns 5000.0000
+Ni 1.3300
+Pm 1.0000
+
+newmtl white
+Kd 0.9000 0.9000 0.9000
+Ks 0.0400 0.0400 0.0400
+Ns 30.0000
+Ni 1.4500
+
+newmtl Wood
+Kd 0.1203 0.0510 0.0428
+Ks 0.0500 0.0500 0.0500
+Ns 30.0000
+Ni 1.4500
+
+newmtl default
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000

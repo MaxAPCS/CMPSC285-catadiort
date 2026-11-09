@@ -8,7 +8,7 @@ use rayon::{
 };
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec2, Vec2x4, Vec3, Vec3x4};
-use wide::{CmpGe, CmpLe, CmpNe, f32x4, u32x4};
+use wide::{CmpGe, CmpLe, f32x4, f64x4, u32x4};
 
 use super::Primitive;
 use super::ray;
@@ -16,7 +16,7 @@ use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext, WorldState};
 use crate::engine::wider;
 
 pub(crate) struct Mesh {
-    triangles: Vec<Tri>,
+    pub(super) triangles: Vec<Tri>,
 }
 
 struct MeshDetails {
@@ -68,6 +68,21 @@ impl Primitive for Mesh {
                     )
                 },
             )
+    }
+
+    fn centroid(&self) -> Vec3 {
+        let (numer, denom) = self
+            .triangles
+            .par_iter()
+            .fold(
+                || (Vec3::zero(), 0.),
+                |(numer, denom), tri| {
+                    let area = tri.wperp().mag();
+                    (numer + tri.centroid() * area, denom + area)
+                },
+            )
+            .reduce(|| (Vec3::zero(), 0.), |a, b| (a.0 + b.0, a.1 + b.1));
+        numer / denom
     }
 
     #[allow(unused)]
@@ -187,7 +202,7 @@ impl Mesh {
     }
 }
 
-struct Tri {
+pub(super) struct Tri {
     o: Vec3,
     e1: Vec3,
     e2: Vec3,
@@ -212,6 +227,16 @@ impl Primitive for Tri {
                 )
             },
         )
+    }
+
+    fn centroid(&self) -> Vec3 {
+        Vec3::broadcast(1. / 3.)
+            * unsafe {
+                self.positions()
+                    .into_iter()
+                    .reduce(|a, b| a + b)
+                    .unwrap_unchecked()
+            }
     }
 
     fn cutout(
@@ -311,7 +336,7 @@ impl Primitive for Tri {
         }
 
         let t = inv_det * self.e2.dot(s_cross_e1);
-        if t < 0. || t > ray.max_t {
+        if t <= 0. || t > ray.max_t {
             return false;
         }
 
@@ -321,43 +346,52 @@ impl Primitive for Tri {
     }
 
     fn intersect(&self, ray: &ray::Rayx4, depth: u16) -> Option<ray::Hitx4> {
-        let e1 = Vec3x4::splat(self.e1);
-        let e2 = Vec3x4::splat(self.e2);
+        let o = wider::cast_d(Vec3x4::splat(self.o));
+        let e1 = wider::cast_d(Vec3x4::splat(self.e1));
+        let e2 = wider::cast_d(Vec3x4::splat(self.e2));
+        let rwpos = wider::cast_d(ray.pos);
+        let rwdir = wider::cast_d(ray.dir);
 
-        let ray_cross_e2 = ray.dir.cross(e2);
+        let ray_cross_e2 = rwdir.cross(e2);
         let det = e1.dot(ray_cross_e2);
-        let mut m = det.cmp_ne(f32x4::ZERO);
+        let mut m = det.cmp_le(-f64::EPSILON) | det.cmp_ge(f64::EPSILON);
         if m.none() {
             return None; // This ray is parallel to this triangle.
         }
 
-        let inv_det = det.recip();
-        let s = ray.pos - Vec3x4::splat(self.o);
+        let inv_det = f64x4::ONE / det;
+        let s = rwpos - o;
         let u = inv_det * s.dot(ray_cross_e2);
-        m &= u.cmp_ge(f32x4::ZERO) & u.cmp_le(f32x4::ONE);
+        m &= u.cmp_ge(f64x4::ZERO) & u.cmp_le(f64x4::ONE);
         if m.none() {
             return None;
         }
 
         let s_cross_e1 = s.cross(e1);
-        let v = inv_det * ray.dir.dot(s_cross_e1);
-        m &= v.cmp_ge(f32x4::ZERO) & (u + v).cmp_le(f32x4::ONE);
+        let v = inv_det * rwdir.dot(s_cross_e1);
+        m &= v.cmp_ge(f64x4::ZERO) & (u + v).cmp_le(f64x4::ONE);
         if m.none() {
             return None;
         }
 
+        let u = wider::cast_f32(u);
+        let v = wider::cast_f32(v);
+
         let uv = self.uvx4((u, v));
         let t = inv_det * e2.dot(s_cross_e1);
-        m &= t.cmp_ge(f32x4::ZERO);
+        m &= t.cmp_ge(f64x4::ZERO);
         if m.none() {
             return None;
         }
+
+        let t = wider::cast_f32(t);
+        let mut m = wider::cast_m32(m);
 
         let wpos = ray.pos + ray.dir * t;
         let opos = wider::transform_pointx4(&self.details.wotrans, &wpos);
         m &= self.cutoutx4(wpos, ray.dir, t, opos, (u, v), depth);
 
-        let t = m.blend(t, wider::f32x4_NAN);
+        let t = f32x4::blend(m, t, wider::f32x4_NAN);
         let wnorm = Vec3x4::splat(self.wnorm());
         Some(ray::Hitx4 {
             wotrans: wider::Mat4x4_splat(&self.details.wotrans),
@@ -406,8 +440,13 @@ impl Tri {
     }
 
     #[inline]
-    fn wnorm(&self) -> Vec3 {
-        Vec3::cross(&self.e1, self.e2).normalized()
+    pub fn wperp(&self) -> Vec3 {
+        Vec3::cross(&self.e1, self.e2)
+    }
+
+    #[inline]
+    pub fn wnorm(&self) -> Vec3 {
+        self.wperp().normalized()
     }
 
     #[inline]

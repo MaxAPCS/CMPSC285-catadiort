@@ -1,0 +1,84 @@
+# written by tools/blender2obj.py
+
+newmtl books_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/books_atlas_01.png
+
+newmtl books_02
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/books_atlas_02.png
+
+newmtl books_03
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/books_atlas_03.png
+
+newmtl box_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/box_01_box_01.jpg
+
+newmtl coin_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/coins_01.png
+
+newmtl coin_02
+Kd 0.8000 0.8000 0.8000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/coins_01_coin_02.jpg
+
+newmtl curtain_01
+Kd 0.0000 0.0000 0.0000
+Ks 0.0000 0.0000 0.0000
+Ns 30.0000
+Ni 1.0000
+
+newmtl glass_01
+Kd 0.0000 0.0000 0.0000
+Ks 1.0000 1.0000 1.0000
+Ns 48826.1250
+Ni 1.4500
+Tr 0.9500
+
+newmtl key_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.4000 0.4000 0.4000
+Ns 37.7519
+Ni 1.5000
+map_Kd textures/key_bake_01_key_01.jpg
+
+newmtl metal_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.3831 0.3831 0.3831
+Ns 37.7519
+Ni 1.5000
+map_Kd textures/lamp_bake_01.png
+
+newmtl pencil_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.0960 0.0960 0.0960
+Ns 31.6743
+Ni 1.5000
+map_Kd textures/pencils_bake_01_pencil_01.jpg
+
+newmtl wood_01
+Kd 0.8000 0.8000 0.8000
+Ks 0.4000 0.4000 0.4000
+Ns 30.0000
+Ni 1.5000
+map_Kd textures/wood_01.jpg

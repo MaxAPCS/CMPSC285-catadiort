@@ -1,0 +1,49 @@
+{
+ "camera": {
+  "eye": [
+   0.0,
+   5.5,
+   24.0
+  ],
+  "lookat": [
+   0.0,
+   11.0,
+   -10.0
+  ],
+  "up": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "type": "perspective",
+  "fov": 47.0,
+  "lensradius": 0.3,
+  "focaldistance": 17.0,
+  "mirrored_by_scale": true,
+  "aspect": 0.7142857142857143,
+  "fovy_deg": 62.660870028372074
+ },
+ "film": {
+  "xresolution": 1000,
+  "yresolution": 1400,
+  "cropwindow": null
+ },
+ "lights": [],
+ "spheres": [
+  {
+   "center": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "radius": 100.0,
+   "material": "diffuse",
+   "instanced": false
+  }
+ ],
+ "static_obj": "crown.obj",
+ "static_triangles": 3540214,
+ "prototypes": {},
+ "instanced_triangles": 0,
+ "materials": 48
+}
