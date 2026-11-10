@@ -125,11 +125,12 @@ impl RtMaterial {
     /// - ray_wdir: Ray's Worldspace Direction, normalized
     fn color(
         &self,
-        shadowrays: &[ray::ShadowRay],
+        shadowrays: impl IntoIterator<Item = ray::ShadowRay>,
         obj_norm: Vec3,
         ray_wdir: Vec3,
         ambient: Vec3,
     ) -> Vec3 {
+        let phongexp = self.phongexponent() as i32;
         let mut diffuse = Vec3::zero();
         let mut specular = Vec3::zero();
         for shadowray in shadowrays {
@@ -140,7 +141,7 @@ impl RtMaterial {
                     .reflected(obj_norm)
                     .dot(ray_wdir)
                     .max(0.)
-                    .powi(self.phongexponent() as _)
+                    .powi(phongexp)
         }
         (1. - self.transmission) * self.albedo * (ambient + diffuse / core::f32::consts::PI)
             + self.specular * specular

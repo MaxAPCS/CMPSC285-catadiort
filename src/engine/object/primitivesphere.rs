@@ -185,16 +185,16 @@ impl Primitive for Sphere {
 
         let t1 = wider::cast_f32((-b - discrim.sqrt()) / a);
         let opos1 = ropos + rodir * t1;
+        let wpos1 = rays.pos + rays.dir * t1;
         let uv1 = Self::uvx4(opos1);
 
-        let m1 = t1.cmp_ge(f32x4::ZERO)
-            & self.cutoutx4(rays.pos + rays.dir * t1, rays.dir, t1, opos1, uv1, depth);
+        let m1 = t1.cmp_ge(f32x4::ZERO) & self.cutoutx4(wpos1, rays.dir, t1, opos1, uv1, depth);
 
         if m1.all() {
             let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos1).normalized();
             return Some(ray::Hitx4 {
-                wotrans: wider::Mat4x4_splat(&self.wotrans),
-                wpos: rays.pos + rays.dir * t1,
+                opos: opos1,
+                wpos: wpos1,
                 wdir: rays.dir,
                 wnorm,
                 t: t1,
@@ -224,7 +224,7 @@ impl Primitive for Sphere {
         let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
 
         Some(ray::Hitx4 {
-            wotrans: wider::Mat4x4_splat(&self.wotrans),
+            opos,
             wpos: rays.pos + rays.dir * t,
             wdir: rays.dir,
             wnorm,

@@ -1,4 +1,4 @@
-use ultraviolet::{Mat4, Mat4x4, Vec3, Vec3x4, Vec4, Vec4x4};
+use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGt, CmpLt, f32x4, u32x4};
 
 use super::DEPTH_COMPLEXITY;
@@ -55,8 +55,8 @@ impl Rayx4 {
 }
 
 pub(super) struct Hitx4 {
-    /// World to Object Transform
-    pub wotrans: Mat4x4,
+    /// Objectspace Hit Position
+    pub opos: Vec3x4,
     /// Worldspace Hit Position
     pub wpos: Vec3x4,
     /// Worldspace Incidient Direction
@@ -81,9 +81,7 @@ impl Hitx4 {
     pub(super) fn collapse(&mut self, other: Self) {
         let me = (!self.t.is_nan()) & (other.t.is_nan() | self.t.cmp_lt(other.t));
 
-        for i in 0..4 {
-            self.wotrans.cols[i] = Vec4x4::blend(me, self.wotrans.cols[i], other.wotrans.cols[i]);
-        }
+        self.opos = Vec3x4::blend(me, self.opos, other.opos);
         self.wpos = Vec3x4::blend(me, self.wpos, other.wpos);
         self.wdir = Vec3x4::blend(me, self.wdir, other.wdir);
         self.wnorm = Vec3x4::blend(me, self.wnorm, other.wnorm);
@@ -100,12 +98,10 @@ impl Hitx4 {
 
     pub fn shade(&self, material: &Material, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
         let hits: [Hit; 4] = self.into();
-        let opos: [Vec3; 4] = self.wotrans.transform_point3(self.wpos).into();
-
         let mut out_norms = [Vec3::zero(); 4];
         let mut out_matrs = [const { core::mem::MaybeUninit::uninit() }; 4];
         for i in 0..4 {
-            let (norm, matr) = hits[i].shade(opos[i], material, depth);
+            let (norm, matr) = hits[i].shade(material, depth);
             out_norms[i] = norm;
             out_matrs[i].write(matr);
         }
@@ -153,8 +149,8 @@ fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4
 
 #[derive(bytemuck::Zeroable)]
 pub(super) struct Hit {
-    /// World to Object Transform
-    pub wotrans: Mat4,
+    /// Objectspace Hit Position
+    pub opos: Vec3,
     /// Worldspace Hit Position
     pub wpos: Vec3,
     /// Worldspace Incident Direction (towards wpos)
@@ -175,7 +171,7 @@ pub(super) struct Hit {
 }
 
 impl Hit {
-    fn shade(&self, opos: Vec3, material: &Material, depth: u16) -> (Vec3, RtMaterial) {
+    fn shade(&self, material: &Material, depth: u16) -> (Vec3, RtMaterial) {
         let mut matr: RtMaterial = material.into();
         if !self.color.x.is_nan() {
             matr.albedo = self.color;
@@ -189,7 +185,7 @@ impl Hit {
             self.wdir,
             self.wnorm,
             self.t,
-            opos,
+            self.opos,
             self.norm,
             self.uv,
             depth,
@@ -202,7 +198,7 @@ impl Hit {
 
 impl Into<[Hit; 4]> for &Hitx4 {
     fn into(self) -> [Hit; 4] {
-        let wotrans: [[Vec4; 4]; 4] = self.wotrans.cols.map(|c| c.into());
+        let opos: [Vec3; 4] = self.opos.into();
         let wpos: [Vec3; 4] = self.wpos.into();
         let wdir: [Vec3; 4] = self.wdir.into();
         let wnorm: [Vec3; 4] = self.wnorm.into();
@@ -214,7 +210,7 @@ impl Into<[Hit; 4]> for &Hitx4 {
         let material = self.material.as_array_ref();
 
         core::array::from_fn(|i| Hit {
-            wotrans: Mat4::new(wotrans[0][i], wotrans[1][i], wotrans[2][i], wotrans[3][i]),
+            opos: opos[i],
             wpos: wpos[i],
             wdir: wdir[i],
             wnorm: wnorm[i],
@@ -229,7 +225,7 @@ impl Into<[Hit; 4]> for &Hitx4 {
 
 impl From<[Hit; 4]> for Hitx4 {
     fn from(value: [Hit; 4]) -> Self {
-        let wotrans: [Vec4x4; 4] = core::array::from_fn(|i| value[i].wotrans.cols.into());
+        let opos: [Vec3; 4] = core::array::from_fn(|i| value[i].opos);
         let wpos: [Vec3; 4] = core::array::from_fn(|i| value[i].wpos);
         let wdir: [Vec3; 4] = core::array::from_fn(|i| value[i].wdir);
         let wnorm: [Vec3; 4] = core::array::from_fn(|i| value[i].wnorm);
@@ -241,7 +237,7 @@ impl From<[Hit; 4]> for Hitx4 {
         let material: [u32; 4] = core::array::from_fn(|i| value[i].material);
 
         Self {
-            wotrans: Mat4x4 { cols: wotrans },
+            opos: opos.into(),
             wpos: wpos.into(),
             wdir: wdir.into(),
             wnorm: wnorm.into(),

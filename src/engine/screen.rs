@@ -227,19 +227,18 @@ impl Screen {
                 if wghsa[i].component_max() <= 0.0 {
                     continue;
                 }
-                let shadowrays: Vec<_> = world
-                    .shadowrays(wpos[i])
-                    .filter_map(|mut sr| {
-                        if sr.dir.dot(norm[i]) <= 0.0 {
-                            return None;
-                        }
-                        sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
-                        world.shadow(&mut sr, depth);
+                let shadowrays = world.shadowrays(wpos[i]).filter_map(|mut sr| {
+                    if sr.dir.dot(norm[i]) <= 0.0 {
+                        return None;
+                    }
+                    sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
+                    if world.shadow(&mut sr, depth) {
+                        None
+                    } else {
                         Some(sr)
-                    })
-                    .collect();
-                contribs[i] =
-                    matrs[i].color(shadowrays.as_slice(), norm[i], wdir[i], world.ambientcolor);
+                    }
+                });
+                contribs[i] = matrs[i].color(shadowrays, norm[i], wdir[i], world.ambientcolor);
                 if wnorm[i].dot(wdir[i]) < 0. || !material.emits() {
                     contribs[i] += matrs[i].emission;
                 }

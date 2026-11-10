@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
+};
 use ultraviolet::{Mat4, Vec3};
 
 use super::{transform, *};
@@ -201,13 +204,24 @@ pub unsafe extern "C" fn rtTriangleMesh(
     st: *const (RtFloat, RtFloat),
     cs: *const RtColor,
     ntris: RtInt,
-    indices: *const [RtInt; 3],
+    indexes: *const [RtInt; 3],
 ) {
-    if nverts <= 0 || ntris <= 0 || p.is_null() || indices.is_null() {
+    if nverts <= 0 || ntris <= 0 || p.is_null() || indexes.is_null() {
         #[cfg(debug_assertions)]
         println!("rtobject: skipped rtTriangleMesh with nverts {}", nverts);
         return;
     }
+
+    let hash = {
+        let mut hasher = std::hash::DefaultHasher::new();
+        p.hash(&mut hasher);
+        n.hash(&mut hasher);
+        st.hash(&mut hasher);
+        cs.hash(&mut hasher);
+        indexes.hash(&mut hasher);
+        hasher.finish()
+    };
+
     let nverts = nverts as usize;
     let p = unsafe { core::slice::from_raw_parts(p, nverts) }.to_vec();
     let n = if n.is_null() {
@@ -225,12 +239,12 @@ pub unsafe extern "C" fn rtTriangleMesh(
     } else {
         Some(unsafe { core::slice::from_raw_parts(cs, nverts) }.to_vec())
     };
-    let indices = unsafe { core::slice::from_raw_parts(indices, ntris as usize) };
+    let indexes = unsafe { core::slice::from_raw_parts(indexes, ntris as usize) };
 
     let ctm = transform::get();
 
     let mut os = OBJECTSTATE.lock().unwrap();
-    let obj = Mesh::create(&mut os, ctm, indices, p, n, cs, st);
+    let obj = Mesh::create(&mut os, ctm, hash, indexes, p, n, cs, st);
     match from_emissive(&obj, &os.get_material()) {
         Some(MeshEmissive::Plane(pl)) => os.world.planelights.push(pl),
         Some(MeshEmissive::Point(pl)) => os.world.pointlights.push(pl),

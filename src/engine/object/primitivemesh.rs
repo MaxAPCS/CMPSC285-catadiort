@@ -16,6 +16,7 @@ use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext, WorldState};
 use crate::engine::wider;
 
 pub(crate) struct Mesh {
+    pub hash: u64, // for instancing
     pub(super) triangles: Vec<Tri>,
 }
 
@@ -139,6 +140,7 @@ impl Mesh {
     pub fn create(
         state: &WorldState,
         ctm: Mat4,
+        hash: u64,
         indexes: &[[i32; 3]],
         mut positions: Vec<Vec3>,
         mut normals: Option<Vec<Vec3>>,
@@ -183,6 +185,7 @@ impl Mesh {
             material: state.get_materialidx(),
         });
         Self {
+            hash,
             triangles: indexes
                 .into_iter()
                 .map(move |idxs| {
@@ -395,14 +398,13 @@ impl Primitive for Tri {
         let opos = wider::transform_pointx4(&self.details.wotrans, &wpos);
         m &= self.cutoutx4(wpos, ray.dir, t, opos, (u, v), depth);
 
-        let t = f32x4::blend(m, t, wider::f32x4_NAN);
         let wnorm = Vec3x4::splat(self.wnorm());
         Some(ray::Hitx4 {
-            wotrans: wider::Mat4x4_splat(&self.details.wotrans),
-            wpos: ray.pos + ray.dir * t,
+            opos,
+            wpos,
             wdir: ray.dir,
             wnorm,
-            t,
+            t: f32x4::blend(m, t, wider::f32x4_NAN),
             norm: self.normx4((u, v)).unwrap_or(wnorm),
             uv,
             color: self

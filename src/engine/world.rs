@@ -63,17 +63,20 @@ impl World {
         }
     }
 
-    pub(super) fn shadow(&self, rays: &mut ray::ShadowRay, depth: u16) {
+    /// Returns:
+    /// - occluded: Whether this ray is occluded
+    pub(super) fn shadow(&self, rays: &mut ray::ShadowRay, depth: u16) -> bool {
         for s in &self.spheres {
             if !self.materials[s.material].emits() && rays.intersect(s, depth) {
-                return;
+                return true;
             }
         }
         for m in &self.meshes {
             if !self.materials[m.material()].emits() && rays.intersect(m, depth) {
-                return;
+                return true;
             }
         }
+        false
     }
 
     pub(super) fn shadowrays(&self, point: Vec3) -> impl Iterator<Item = ray::ShadowRay> {
