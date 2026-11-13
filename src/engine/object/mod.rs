@@ -1,5 +1,4 @@
-use ultraviolet::{Vec3, Vec3x4};
-use wide::f32x4;
+use ultraviolet::{Mat4, Vec3};
 
 use super::ray;
 
@@ -18,30 +17,12 @@ pub(crate) use primitivemesh::*;
 pub(crate) use primitivesphere::*;
 
 pub(super) trait Primitive {
+    #[allow(dead_code)]
     fn bounds(&self) -> (Vec3, Vec3);
     fn centroid(&self) -> Vec3;
 
-    fn cutout(
-        &self,
-        wpos: Vec3,
-        wdir: Vec3,
-        t: f32,
-        opos: Vec3,
-        uv: (f32, f32),
-        depth: u16,
-    ) -> bool;
-    fn cutoutx4(
-        &self,
-        wpos: Vec3x4,
-        wdir: Vec3x4,
-        t: f32x4,
-        opos: Vec3x4,
-        uv: (f32x4, f32x4),
-        depth: u16,
-    ) -> f32x4;
-
     fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool;
-    fn intersect(&self, ray: &ray::Rayx4, depth: u16) -> Option<ray::Hitx4>;
+    fn intersect(&self, rays: &mut ray::Rayx4, depth: u16);
 }
 
 pub(super) trait Light {
@@ -53,16 +34,20 @@ pub enum MeshEmissive {
     Point(PointLight),
 }
 
-pub fn from_emissive(o: &Mesh, material: &crate::api::RtMaterial) -> Option<MeshEmissive> {
+pub fn from_emissive(
+    triangles: &Box<[Tri]>,
+    owtrans_dual: Mat4,
+    material: &crate::api::RtMaterial,
+) -> Option<MeshEmissive> {
     if material.emission == Vec3::zero() {
         return None;
     }
 
-    let wnorm0 = o.triangles[0].wnorm();
+    let wnorm0 = owtrans_dual.transform_vec3(triangles[0].onorm());
     let mut flat = true;
     let mut doublearea = 0.;
-    for tri in &o.triangles {
-        let wperp = tri.wperp();
+    for tri in triangles {
+        let wperp = owtrans_dual.transform_vec3(tri.operp());
         let da = wperp.mag();
         doublearea += da;
         if wnorm0.dot(wperp / da) <= 0.9998 {
@@ -72,13 +57,13 @@ pub fn from_emissive(o: &Mesh, material: &crate::api::RtMaterial) -> Option<Mesh
 
     if flat {
         Some(MeshEmissive::Plane(PlaneLight {
-            pos: o.centroid(),
+            pos: Mesh::tricentroid(triangles),
             intensity: material.emission * doublearea / 2.,
             norm: wnorm0,
         }))
     } else {
         Some(MeshEmissive::Point(PointLight::new(
-            o.centroid(),
+            Mesh::tricentroid(triangles),
             material.emission * doublearea / 8.,
         )))
     }

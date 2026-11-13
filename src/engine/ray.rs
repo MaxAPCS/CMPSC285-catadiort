@@ -13,7 +13,7 @@ pub(super) struct Rayx4 {
     /// Worldspace Ray Direction
     pub dir: Vec3x4,
 
-    hits: smallvec::SmallVec<[Hitx4; DEPTH_COMPLEXITY]>,
+    pub hits: smallvec::SmallVec<[Hitx4; DEPTH_COMPLEXITY]>,
 }
 
 impl Rayx4 {
@@ -24,14 +24,6 @@ impl Rayx4 {
             dir,
             hits: smallvec::SmallVec::new(),
         }
-    }
-
-    #[inline]
-    /// Insert hit on one object to every lane
-    pub fn intersect<T: Primitive>(&mut self, primitive: &T, depth: u16) {
-        if let Some(hit) = primitive.intersect(self, depth) {
-            self.hits.push(hit);
-        };
     }
 
     #[inline]
@@ -51,6 +43,14 @@ impl Rayx4 {
     pub fn get(&mut self) -> Option<Hitx4> {
         debug_assert!(self.hits.len() <= 1);
         self.hits.pop()
+    }
+
+    #[cfg(feature = "bvh")]
+    #[inline]
+    pub fn closest_t(&self) -> f32x4 {
+        self.hits
+            .first()
+            .map_or(f32x4::splat(f32::INFINITY), |h| h.t)
     }
 }
 

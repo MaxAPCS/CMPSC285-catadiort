@@ -36,7 +36,7 @@ import subprocess
 import sys
 import time
 
-ROOT = pathlib.Path.cwd() / "assets"
+ROOT = pathlib.Path.cwd()
 TIERS = ("benchmark", "hero")
 ENTRY = re.compile(r'\{\s*"([^"]+)"\s*,\s*\w+\s*,\s*"([^"]+)"\s*\}')
 TIME = re.compile(r"^TIME (\S+) build=([\d.]+) render=([\d.]+) total=([\d.]+) threads=(\d+)", re.M)
@@ -48,7 +48,7 @@ TIMEOUT = 3600  # seconds per run
 
 def tier_scenes(root):
     """The scene names of the benchmark and hero tiers, in table order."""
-    table = root / "scenes" / "1_Whitted" / "0_scene_table.cpp"
+    table = root / "assets" / "scenes" / "1_Whitted" / "0_scene_table.cpp"
     if not table.exists():
         sys.exit("timing_table: %s not found; run from the kit's root folder" % table)
     return [name for name, tier in ENTRY.findall(table.read_text(encoding="utf-8")) if tier in TIERS]

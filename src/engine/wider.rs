@@ -1,25 +1,8 @@
-use ultraviolet::{DVec3x4, DVec4x4, Mat4, Mat4x4, Vec3, Vec3x4, Vec3x8, Vec4x4, Vec4x8};
-use wide::{CmpGt, f32x4, f32x8, f64x4, i32x4, u32x4};
+use ultraviolet::{DVec3x4, DVec4x4, Mat4, Vec3, Vec3x4, Vec4x4};
+use wide::{CmpGt, f32x4, f64x4, i32x4, u32x4};
 
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
-
-#[inline]
-pub fn transform_pointx8(mat: &Mat4, p: &Vec3x8) -> Vec3x8 {
-    let mut out = Vec4x8::zero();
-
-    for (k, slot) in out.as_mut_array().iter_mut().enumerate() {
-        *slot = p.x.mul_add(
-            f32x8::splat(mat.cols[0][k]),
-            p.y.mul_add(
-                f32x8::splat(mat.cols[1][k]),
-                p.z.mul_add(f32x8::splat(mat.cols[2][k]), f32x8::splat(mat.cols[3][k])),
-            ),
-        );
-    }
-
-    Vec3x8::from_homogeneous_point(out)
-}
 
 #[inline]
 pub fn transform_pointx4(mat: &Mat4, p: &Vec3x4) -> Vec3x4 {
@@ -92,14 +75,6 @@ pub fn transform_vecx4d(mat: &Mat4, v: &Vec3x4) -> DVec3x4 {
     }
 
     DVec3x4::from_homogeneous_vector(out)
-}
-
-#[inline]
-#[allow(non_snake_case)]
-pub fn Mat4x4_splat(mat4: &Mat4) -> Mat4x4 {
-    Mat4x4 {
-        cols: mat4.cols.map(|c| c.into()),
-    }
 }
 
 #[inline]

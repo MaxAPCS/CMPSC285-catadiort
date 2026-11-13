@@ -4,6 +4,8 @@ use wide::f32x4;
 
 use crate::api::{RtMaterial, RtShadeContext, RtShaderFn};
 
+#[cfg(feature = "bvh")]
+mod bvh;
 mod object;
 mod ray;
 mod screen;

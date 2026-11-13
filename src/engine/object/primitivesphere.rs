@@ -42,6 +42,130 @@ impl Primitive for Sphere {
         self.wotrans.inversed().extract_translation()
     }
 
+    fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {
+        let ropos = self.wotrans.transform_point3(ray.pos);
+        let rodir = self.wotrans.transform_vec3(ray.dir);
+
+        let a = rodir.mag_sq();
+        let b = ropos.dot(rodir);
+        let c = ropos.mag_sq() - 1.;
+        let discrim = b * b - a * c;
+
+        if discrim < 0. {
+            return false;
+        }
+
+        let t1 = (-b - discrim.sqrt()) / a;
+
+        if t1 >= ray.max_t {
+            return false;
+        }
+
+        let opos1 = ropos + rodir * t1;
+        if (t1 > 0.)
+            & self.cutout(
+                ray.pos + ray.dir * t1,
+                ray.dir,
+                t1,
+                opos1,
+                Self::uv(opos1),
+                depth,
+            )
+        {
+            return true;
+        }
+
+        if discrim == 0. {
+            return false;
+        }
+
+        let t2 = (-b + discrim.sqrt()) / a;
+
+        let opos2 = ropos + rodir * t2;
+        (t2 > 0. && t2 < ray.max_t)
+            & self.cutout(
+                ray.pos + ray.dir * t2,
+                ray.dir,
+                t2,
+                opos2,
+                Self::uv(opos2),
+                depth,
+            )
+    }
+
+    fn intersect(&self, rays: &mut ray::Rayx4, depth: u16) {
+        // Ray Object-Space Position & Direction
+        let ropos = wider::transform_pointx4d(&self.wotrans, &rays.pos);
+        let rodir = wider::transform_vecx4d(&self.wotrans, &rays.dir);
+
+        let a = rodir.mag_sq();
+        let b = ropos.dot(rodir);
+        let c = ropos.mag_sq() - 1.;
+        let discrim = b * b - a * c;
+
+        if discrim.cmp_lt(f64x4::ZERO).all() {
+            return;
+        }
+
+        let ropos = wider::cast_s(ropos);
+        let rodir = wider::cast_s(rodir);
+
+        let t1 = wider::cast_f32((-b - discrim.sqrt()) / a);
+        let opos1 = ropos + rodir * t1;
+        let wpos1 = rays.pos + rays.dir * t1;
+        let uv1 = Self::uvx4(opos1);
+
+        let m1 = t1.cmp_ge(f32x4::ZERO) & self.cutoutx4(wpos1, rays.dir, t1, opos1, uv1, depth);
+
+        if m1.all() {
+            let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos1).normalized();
+            rays.hits.push(ray::Hitx4 {
+                opos: opos1,
+                wpos: wpos1,
+                wdir: rays.dir,
+                wnorm,
+                t: t1,
+                norm: wnorm,
+                uv: uv1,
+                color: Vec3x4::broadcast(wider::f32x4_NAN),
+                material: (self.material as u32).into(),
+            });
+            return;
+        }
+
+        let t2 = wider::cast_f32((-b + discrim.sqrt()) / a);
+        let opos2 = ropos + rodir * t2;
+
+        let m2 = wider::cast_f32(discrim.cmp_ne(f64x4::ZERO))
+            & t2.cmp_ge(f32x4::ZERO)
+            & self.cutoutx4(
+                rays.pos + rays.dir * t2,
+                rays.dir,
+                t2,
+                opos2,
+                Self::uvx4(opos2),
+                depth,
+            );
+
+        let t = m1.blend(t1, m2.blend(t2, wider::f32x4_NAN));
+        let opos = ropos + rodir * t;
+        let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
+
+        rays.hits.push(ray::Hitx4 {
+            opos,
+            wpos: rays.pos + rays.dir * t,
+            wdir: rays.dir,
+            wnorm,
+            t,
+            norm: wnorm,
+            uv: Self::uvx4(opos),
+            color: Vec3x4::broadcast(wider::f32x4_NAN),
+            material: (self.material as u32).into(),
+        })
+    }
+}
+
+impl Sphere {
     fn cutout(
         &self,
         wpos: Vec3,
@@ -115,129 +239,6 @@ impl Primitive for Sphere {
         bytemuck::cast(out)
     }
 
-    fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {
-        let ropos = self.wotrans.transform_point3(ray.pos);
-        let rodir = self.wotrans.transform_vec3(ray.dir);
-
-        let a = rodir.mag_sq();
-        let b = ropos.dot(rodir);
-        let c = ropos.mag_sq() - 1.;
-        let discrim = b * b - a * c;
-
-        if discrim < 0. {
-            return false;
-        }
-
-        let t1 = (-b - discrim.sqrt()) / a;
-
-        if t1 >= ray.max_t {
-            return false;
-        }
-
-        let opos1 = ropos + rodir * t1;
-        if (t1 > 0.)
-            & self.cutout(
-                ray.pos + ray.dir * t1,
-                ray.dir,
-                t1,
-                opos1,
-                Self::uv(opos1),
-                depth,
-            )
-        {
-            return true;
-        }
-
-        if discrim == 0. {
-            return false;
-        }
-
-        let t2 = (-b + discrim.sqrt()) / a;
-
-        let opos2 = ropos + rodir * t2;
-        (t2 > 0. && t2 < ray.max_t)
-            & self.cutout(
-                ray.pos + ray.dir * t2,
-                ray.dir,
-                t2,
-                opos2,
-                Self::uv(opos2),
-                depth,
-            )
-    }
-
-    fn intersect(&self, rays: &ray::Rayx4, depth: u16) -> Option<ray::Hitx4> {
-        // Ray Object-Space Position & Direction
-        let ropos = wider::transform_pointx4d(&self.wotrans, &rays.pos);
-        let rodir = wider::transform_vecx4d(&self.wotrans, &rays.dir);
-
-        let a = rodir.mag_sq();
-        let b = ropos.dot(rodir);
-        let c = ropos.mag_sq() - 1.;
-        let discrim = b * b - a * c;
-
-        if discrim.cmp_lt(f64x4::ZERO).all() {
-            return None;
-        }
-
-        let ropos = wider::cast_s(ropos);
-        let rodir = wider::cast_s(rodir);
-
-        let t1 = wider::cast_f32((-b - discrim.sqrt()) / a);
-        let opos1 = ropos + rodir * t1;
-        let wpos1 = rays.pos + rays.dir * t1;
-        let uv1 = Self::uvx4(opos1);
-
-        let m1 = t1.cmp_ge(f32x4::ZERO) & self.cutoutx4(wpos1, rays.dir, t1, opos1, uv1, depth);
-
-        if m1.all() {
-            let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos1).normalized();
-            return Some(ray::Hitx4 {
-                opos: opos1,
-                wpos: wpos1,
-                wdir: rays.dir,
-                wnorm,
-                t: t1,
-                norm: wnorm,
-                uv: uv1,
-                color: Vec3x4::broadcast(wider::f32x4_NAN),
-                material: (self.material as u32).into(),
-            });
-        }
-
-        let t2 = wider::cast_f32((-b + discrim.sqrt()) / a);
-        let opos2 = ropos + rodir * t2;
-
-        let m2 = wider::cast_f32(discrim.cmp_ne(f64x4::ZERO))
-            & t2.cmp_ge(f32x4::ZERO)
-            & self.cutoutx4(
-                rays.pos + rays.dir * t2,
-                rays.dir,
-                t2,
-                opos2,
-                Self::uvx4(opos2),
-                depth,
-            );
-
-        let t = m1.blend(t1, m2.blend(t2, wider::f32x4_NAN));
-        let opos = ropos + rodir * t;
-        let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
-
-        Some(ray::Hitx4 {
-            opos,
-            wpos: rays.pos + rays.dir * t,
-            wdir: rays.dir,
-            wnorm,
-            t,
-            norm: wnorm,
-            uv: Self::uvx4(opos),
-            color: Vec3x4::broadcast(wider::f32x4_NAN),
-            material: (self.material as u32).into(),
-        })
-    }
-}
-
-impl Sphere {
     #[inline]
     pub fn extract_avg_scale(&self) -> f32 {
         let inv3 = self.wotrans.inversed().truncate();

@@ -1,14 +1,9 @@
-use std::{
-    hash::{Hash, Hasher},
-    sync::{Arc, Mutex},
-};
+use core::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
 use ultraviolet::{Mat4, Vec3};
 
 use super::{transform, *};
-use crate::engine::{
-    DirectionalLight, Material, Mesh, MeshEmissive, PointLight, Sphere, SpotLight, World,
-    from_emissive,
-};
+use crate::engine::{DirectionalLight, Material, Mesh, PointLight, Sphere, SpotLight, World};
 
 pub(crate) struct WorldState {
     pub shader: Option<unsafe extern "C" fn(*mut RtShadeContext)>,
@@ -60,7 +55,7 @@ impl WorldState {
         self.material
     }
 
-    fn get_material(&self) -> RtMaterial {
+    pub fn get_material(&self) -> RtMaterial {
         (&self.world.materials[self.material]).into()
     }
 }
@@ -211,6 +206,7 @@ pub unsafe extern "C" fn rtTriangleMesh(
         println!("rtobject: skipped rtTriangleMesh with nverts {}", nverts);
         return;
     }
+    let indexes = unsafe { core::slice::from_raw_parts(indexes, ntris as usize) };
 
     let hash = {
         let mut hasher = std::hash::DefaultHasher::new();
@@ -221,6 +217,19 @@ pub unsafe extern "C" fn rtTriangleMesh(
         indexes.hash(&mut hasher);
         hasher.finish()
     };
+    let mut os: std::sync::MutexGuard<'_, WorldState> = OBJECTSTATE.lock().unwrap();
+    let ctm = transform::get();
+    let cutout = os.cutout;
+    let cutoutparams = os.cutoutparams.clone();
+    let material = os.get_materialidx() as _;
+    let materialobj = os.get_material();
+
+    if os
+        .world
+        .mesh_instance(hash, ctm, cutout, &cutoutparams, material, materialobj)
+    {
+        return;
+    }
 
     let nverts = nverts as usize;
     let p = unsafe { core::slice::from_raw_parts(p, nverts) }.to_vec();
@@ -239,16 +248,14 @@ pub unsafe extern "C" fn rtTriangleMesh(
     } else {
         Some(unsafe { core::slice::from_raw_parts(cs, nverts) }.to_vec())
     };
-    let indexes = unsafe { core::slice::from_raw_parts(indexes, ntris as usize) };
 
-    let ctm = transform::get();
-
-    let mut os = OBJECTSTATE.lock().unwrap();
-    let obj = Mesh::create(&mut os, ctm, hash, indexes, p, n, cs, st);
-    match from_emissive(&obj, &os.get_material()) {
-        Some(MeshEmissive::Plane(pl)) => os.world.planelights.push(pl),
-        Some(MeshEmissive::Point(pl)) => os.world.pointlights.push(pl),
-        None => {}
-    }
-    os.world.meshes.push(obj);
+    os.world.mesh_create(
+        hash,
+        ctm,
+        cutout,
+        cutoutparams.clone(),
+        material,
+        materialobj,
+        Mesh::tricreate(indexes, p, n, cs, st),
+    );
 }

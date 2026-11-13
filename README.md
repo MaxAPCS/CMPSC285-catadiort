@@ -82,7 +82,11 @@ made available, are the tools for finding out why.
 
 ## Footnotes
 
-This project in total was extremely challenging. I may have overscoped by attempting to complete the entire thing with SIMD, and spent a long time perfecting the architecture to ensure everything went smoothly. In particular, it was challenging to hunt down very specific bugs in NaN handling (which I used as a sentinel for empty lanes). I think that I had a good shot, but didn't end up having enough time to complete what I wanted to. Please forgive me.
+This project in total was extremely challenging. I may have overscoped by attempting to complete the entire thing with SIMD, and spent a long time perfecting the architecture to ensure everything went smoothly. In particular, it was challenging to hunt down very specific bugs in NaN handling (which I used as a sentinel for empty lanes). I think that I had a good shot, but didn't end up having enough time to complete what I wanted to.
+
+There is no BVH. I was not able to finish in time, and am at the end of my rope. 
 
 **Extra Credit:**
 - Ground-up SoA SIMD Architecture
+
+AI was used strictly to debug/check for errors. All code written by hand.
