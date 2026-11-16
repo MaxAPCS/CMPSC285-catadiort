@@ -1,6 +1,4 @@
-use std::sync::Arc;
 use ultraviolet::Vec3;
-use wide::f32x4;
 
 use crate::api::{RtMaterial, RtShadeContext, RtShaderFn};
 
@@ -12,45 +10,19 @@ mod screen;
 mod wider;
 mod world;
 
-pub(crate) use object::*;
+pub use object::*;
 pub(crate) use screen::*;
 pub(crate) use world::*;
 
-const RECAST_EPSILON: f32 = 1e-4;
-const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
-const DEPTH_COMPLEXITY: usize = 4;
-
 #[derive(Clone)]
 pub(crate) struct Material {
+    pub(super) id: u16,
+
     /// Surface Shader Reference
     pub(super) shader: RtShaderFn,
-    pub(super) shaderparams: Option<Arc<[u8]>>,
+    pub(super) shaderparams: Option<std::sync::Arc<[u8]>>,
 
-    /// kd: diffuse reflectance per channel, 0 to 1
-    pub(super) albedo: Vec3,
-
-    /// ks: the reflectance head on: it weights the mirror ray and the highlight (HW2), the glossy lobe (HW3), and is Schlick's F0, metal or not (HW4)
-    pub(super) specular: Vec3,
-
-    /* radiance emitted (seen directly, this bright). Nonzero makes the draw call a
-    light: a point light at its center in HW2, its surface sampled in HW3, with
-    MIS in HW4 */
-    pub(super) emission: Vec3,
-
-    /* kt: 0 = opaque, 1 = clear glass */
-    pub(super) transmission: f32,
-
-    /* 0 = mirror, 1 = fully rough; the lobe's width is alpha = roughness^2 in every
-    homework. HW2: the Phong exponent n = 2 / alpha^2 - 2 (alpha clamped to
-    [0.05, 1]) and how much of the mirror ray survives; HW3: the glossy lobe's
-    width; HW4: GGX's alpha */
-    pub(super) roughness: f32,
-
-    /* 0 = dielectric, 1 = metal. HW4 only; HW2 and HW3 ignore it */
-    pub(super) metallic: f32,
-
-    /* eta: index of refraction of the inside (1.5 = glass) */
-    pub(super) ior: f32,
+    pub(super) prop: RtMaterial,
 }
 
 impl Material {
@@ -58,61 +30,61 @@ impl Material {
     const fn reflects(&self) -> bool {
         const SQRT_0D15: f32 = 0.3872983346207416885179265399782399610832921705291590826587;
 
-        self.transmission == 0.
-            && self.roughness < SQRT_0D15
-            && (self.specular.x > 0. || self.specular.y > 0. || self.specular.z > 0.)
+        self.prop.transmission == 0.
+            && self.prop.roughness < SQRT_0D15
+            && (self.prop.specular.x > 0. || self.prop.specular.y > 0. || self.prop.specular.z > 0.)
     }
 
     #[inline]
     const fn refracts(&self) -> bool {
-        self.transmission > 0.
+        self.prop.transmission > 0.
     }
 
     #[inline]
     const fn emits(&self) -> bool {
-        self.emission.x > 0. || self.emission.y > 0. || self.emission.z > 0.
+        self.prop.emits()
     }
 
     #[inline]
     const fn smoothness(&self) -> f32 {
-        (1. - self.roughness * self.roughness * 0.15f32.recip()).max(0.)
+        const RECIP_0D15: f32 = 6.6666666666666666666666666666666666666666666666666666666666666666;
+
+        (1. - self.prop.roughness * self.prop.roughness * RECIP_0D15).max(0.)
     }
 
     /// Arguments:
     /// - medium_cos: cosine between incident and medium-facing normal
     /// - object_ior: index of refraction of object
     #[inline]
-    fn fresnelx4(&self, medium_cos: wide::f32x4, object_ior: f32x4) -> f32x4 {
-        if self.ior == world::MEDIUM_IOR {
+    fn fresnelx4(medium_cos: wide::f32x4, object_ior: wide::f32x4) -> wide::f32x4 {
+        use wide::{CmpEq, f32x4};
+        let sameior = object_ior.cmp_eq(world::MEDIUM_IOR);
+        if sameior.all() {
             return f32x4::ZERO;
         }
         let f0 = (object_ior - 1.) / (object_ior + 1.);
         let f0 = f0 * f0;
         let t = f32x4::ONE - medium_cos;
         let t2 = t * t;
-        f0 + (f32x4::ONE - f0) * t2 * t2 * t
+        sameior.blend(f32x4::ZERO, f0 + (f32x4::ONE - f0) * t2 * t2 * t)
     }
 
-    pub(crate) const fn from(
-        other: RtMaterial,
+    pub(crate) const fn new(
+        id: u16,
         shader: RtShaderFn,
-        shaderparams: Option<Arc<[u8]>>,
+        shaderparams: Option<std::sync::Arc<[u8]>>,
+        prop: RtMaterial,
     ) -> Self {
         Self {
-            albedo: other.albedo,
-            specular: other.specular,
-            roughness: other.roughness,
-            metallic: other.metallic,
-            transmission: other.transmission,
-            ior: other.ior,
-            emission: other.emission,
+            id,
             shader,
             shaderparams,
+            prop,
         }
     }
 
-    const fn default() -> Self {
-        Self::from(RtMaterial::default_material(), None, None)
+    pub(crate) const fn default() -> Self {
+        Self::new(0, None, None, RtMaterial::default_material())
     }
 }
 
@@ -150,23 +122,9 @@ impl RtMaterial {
     }
 }
 
-impl Into<RtMaterial> for &Material {
-    fn into(self) -> RtMaterial {
-        RtMaterial {
-            albedo: self.albedo,
-            specular: self.specular,
-            roughness: self.roughness,
-            metallic: self.metallic,
-            transmission: self.transmission,
-            ior: self.ior,
-            emission: self.emission,
-        }
-    }
-}
-
 impl RtShadeContext {
     fn new(
-        params: &Option<Arc<[u8]>>,
+        params: &Option<std::sync::Arc<[u8]>>,
         wpos: Vec3,
         wdir: Vec3,
         wnorm: Vec3,
@@ -182,8 +140,8 @@ impl RtShadeContext {
             Po: opos,
             Ng: wnorm,
             N: norm,
-            dPdu: Vec3::zero(),
-            dPdv: Vec3::zero(),
+            dPdu: Vec3::broadcast(0.),
+            dPdv: Vec3::broadcast(0.),
             u: uv.0,
             v: uv.1,
             I: wdir,

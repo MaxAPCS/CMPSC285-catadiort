@@ -1,13 +1,11 @@
 use ultraviolet::Vec3;
 
-use super::Light;
-use super::Primitive;
-use super::{Sphere, ray::ShadowRay};
-use crate::api::RtMaterial;
+use super::{Light, Primitive, Sphere};
+use crate::{api::RtMaterial, engine::ray::ShadowRay};
 
-pub(crate) struct PointLight {
-    pub(super) pos: Vec3,
-    pub(super) intensity: Vec3,
+pub struct PointLight {
+    pub pos: Vec3,
+    pub intensity: Vec3,
     radius: f32,
 }
 
@@ -16,12 +14,7 @@ impl Light for PointLight {
         let dir = self.pos - pos;
         let dst_sq = dir.mag_sq();
         let dst = dst_sq.sqrt();
-        ShadowRay {
-            pos,
-            dir: dir / dst,
-            max_t: dst - self.radius,
-            irradiance: self.intensity / dst_sq,
-        }
+        ShadowRay::new(pos, dir / dst, dst - self.radius, self.intensity / dst_sq)
     }
 }
 

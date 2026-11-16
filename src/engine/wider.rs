@@ -177,7 +177,7 @@ impl<T, U> Accum4<T, U> {
     }
 }
 
-impl<T: Copy, U: bytemuck::Zeroable> Accum4<T, U> {
+impl<T: Copy, U: Default> Accum4<T, U> {
     pub fn flush(&mut self, pad_one: T) -> Option<([u32; 4], [T; 4], [U; 4])> {
         if self.n == 0 {
             return None;
@@ -186,7 +186,7 @@ impl<T: Copy, U: bytemuck::Zeroable> Accum4<T, U> {
             empty.write(pad_one);
         }
         for empty in &mut self.twos[self.n..4] {
-            empty.write(U::zeroed());
+            empty.write(U::default());
         }
         self.n = 0;
 

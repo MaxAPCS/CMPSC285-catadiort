@@ -678,12 +678,12 @@ inline void ObjDraw(ObjMesh *mesh, int flags = 0, ObjMaterialHook hook = NULL, v
  * the twelve numbers of a 4 x 3 transformation in rtConcatTransform's
  * row-vector convention. Each model is loaded once and drawn once per line under the current
  * transformation; # starts a comment. Returns the count drawn. */
-inline int ObjDrawInstances(const char *opath, int flags = 0, ObjMaterialHook hook = NULL, void *user = NULL)
+inline int ObjDrawInstances(const char *path, int flags = 0, ObjMaterialHook hook = NULL, void *user = NULL)
 {
-    char path[512];
-    snprintf(path, sizeof(path), "assets/%s", opath);
+    char fpath[512];
+    snprintf(fpath, sizeof(fpath), "assets/%s", path);
     
-    std::ifstream file(path);
+    std::ifstream file(fpath);
     if (!file) {
         std::fprintf(stderr, "ObjDrawInstances: cannot open %s\n", path);
         return 0;

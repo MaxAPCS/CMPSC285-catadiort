@@ -5,14 +5,15 @@ use rayon::{
 use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGt, f32x4};
 
-use super::ray;
-use super::wider;
-use super::world;
-use super::{RECAST_EPSILON, RECAST_EPSILON_X4};
+use super::{Material, ray, wider, world};
+use crate::api::RtMaterial;
 #[cfg(debug_assertions)]
 use crate::rt_trace;
 #[cfg(debug_assertions)]
 use crate::utils::debug::vec3_display;
+
+const RECAST_EPSILON: f32 = 1e-4;
+const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
 pub(crate) struct Screen {
@@ -144,7 +145,7 @@ impl Screen {
         let mut srchits = Vec::with_capacity(srchits_est);
         src.into_iter().for_each(|(idxs, wghs, rays)| {
             let wghs: [Vec3; 4] = (*wghs).into();
-            let Some(hit) = rays.get() else {
+            let Some(mut hit) = rays.get() else {
                 let env: [Vec3; 4] = world.sample_environmentx4(rays.dir).into();
                 for i in 0..4 {
                     if wghs[i].component_max() <= 0. {
@@ -154,7 +155,8 @@ impl Screen {
                 }
                 return;
             };
-            let hits: [ray::Hit; 4] = (&hit).into();
+            let hits: [ray::Hit; 4] = (&mut hit).into();
+            drop(hit);
             for (i, hit) in hits.into_iter().enumerate() {
                 if wghs[i].component_max() <= 0. {
                     continue;
@@ -184,7 +186,7 @@ impl Screen {
                 srchits.push((idxs[i], wghs[i], hit));
             }
         });
-        srchits.par_sort_unstable_by_key(|l| l.2.material);
+        srchits.par_sort_unstable_by_key(|l| l.2.material.as_ref().map_or_default(|m| m.id));
 
         // Group Source Hits
         let srchitx4s_est = srchits.len() * 3 / 10;
@@ -193,7 +195,8 @@ impl Screen {
             let mut group: wider::Accum4<Vec3, ray::Hit> = wider::Accum4::new();
             for (idx, wgh, hit) in srchits {
                 if let Some(peek) = group.peek()
-                    && peek.2.material != hit.material
+                    && peek.2.material.as_ref().map_or_default(|m| m.id)
+                        != hit.material.as_ref().map_or_default(|m| m.id)
                 {
                     let flush = unsafe { group.flush(Vec3::zero()).unwrap_unchecked() };
                     srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
@@ -210,10 +213,14 @@ impl Screen {
 
         // Shade Source Hits
         srchitx4s.par_iter_mut().for_each(|(_, wghs, hits)| {
-            let material = &world.materials[hits.material.as_array_ref()[0] as usize];
+            let emits = hits.material[0]
+                .as_ref()
+                .map_or(const { RtMaterial::default_material().emits() }, |m| {
+                    m.emits()
+                });
 
             hits.norm = wider::copysignx4(hits.norm, -hits.wdir);
-            let (norm, matrs) = hits.shade(material, depth);
+            let (norm, matrs) = hits.shade(depth);
             hits.norm = wider::copysignx4(norm.normalized(), -hits.wdir); // write back shader norms
 
             let mut contribs = [Vec3::zero(); 4];
@@ -232,14 +239,15 @@ impl Screen {
                         return None;
                     }
                     sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
-                    if world.shadow(&mut sr, depth) {
-                        None
-                    } else {
+                    world.obstruct(&mut sr, depth);
+                    if sr.irradiance.component_max() > 0. {
                         Some(sr)
+                    } else {
+                        None
                     }
                 });
                 contribs[i] = matrs[i].color(shadowrays, norm[i], wdir[i], world.ambientcolor);
-                if wnorm[i].dot(wdir[i]) < 0. || !material.emits() {
+                if wnorm[i].dot(wdir[i]) < 0. || !emits {
                     contribs[i] += matrs[i].emission;
                 }
             }
@@ -270,10 +278,13 @@ impl Screen {
         *dst = srchitx4s
             .into_par_iter()
             .flat_map_iter(|(idxs, wghs, hits)| {
-                let material = &world.materials[hits.material.as_array_ref()[0] as usize];
+                let material = hits.material[0]
+                    .as_deref()
+                    .unwrap_or(const { &Material::default() });
+
                 let mut children = smallvec::SmallVec::<[_; 3]>::new();
                 if material.reflects() {
-                    let nwgh = Vec3x4::splat(material.specular * material.smoothness());
+                    let nwgh = Vec3x4::splat(material.prop.specular * material.smoothness());
                     let twgh = wghs * nwgh;
 
                     if twgh.component_max().cmp_gt(f32x4::ZERO).any() {
@@ -290,28 +301,32 @@ impl Screen {
                     }
                 }
                 if material.refracts() {
-                    let (ndi, refractdir) = hits.refract(material);
+                    let (ndi, refractdir) = hits.refract();
                     let reflectwgh = f32x4::blend(
                         refractdir.x.is_nan(),
                         f32x4::ONE,
-                        material.fresnelx4(ndi, material.ior.into()),
+                        Material::fresnelx4(ndi, material.prop.ior.into()),
                     );
-                    let reflectdir = hits.reflect();
 
+                    // if material.specular.component_max() > 0. {
+                    let reflectdir = hits.reflect();
                     children.push((
                         idxs,
-                        wghs * Vec3x4::splat(material.specular) * Vec3x4::broadcast(reflectwgh),
+                        wghs * Vec3x4::splat(material.prop.specular)
+                            * Vec3x4::broadcast(reflectwgh),
                         ray::Rayx4::new(
                             hits.wpos
                                 + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
                             reflectdir,
                         ),
                     ));
+                    // }
 
                     if !refractdir.x.is_nan().all() {
                         children.push((
                             idxs,
-                            wghs * (f32x4::ONE - reflectwgh) * f32x4::splat(material.transmission),
+                            wghs * (f32x4::ONE - reflectwgh)
+                                * f32x4::splat(material.prop.transmission),
                             ray::Rayx4::new(
                                 hits.wpos
                                     + wider::copysignx4(hits.wnorm, refractdir) * RECAST_EPSILON_X4,

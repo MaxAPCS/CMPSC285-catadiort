@@ -1,13 +1,11 @@
-#![allow(non_snake_case)] // the rt* names and the context's fields are the interface's
-
-use core::num::NonZero;
+use core::num::NonZeroUsize;
 use std::{
     ffi::{CStr, c_char},
     sync::Mutex,
 };
 use ultraviolet::Vec3;
 
-use super::{transform, *};
+use super::*;
 use crate::AOV;
 use crate::engine::Screen;
 use crate::options::{Options, options};
@@ -102,11 +100,11 @@ fn text(s: *const c_char) -> String {
 }
 
 /// The worker count: --threads, or every core.
-pub fn thread_count(o: &Options) -> NonZero<usize> {
-    if let Some(t) = NonZero::new(o.threads) {
+pub fn thread_count(o: &Options) -> NonZeroUsize {
+    if let Some(t) = NonZeroUsize::new(o.threads) {
         return t;
     }
-    std::thread::available_parallelism().unwrap_or(unsafe { NonZero::new_unchecked(1) })
+    std::thread::available_parallelism().unwrap_or(unsafe { NonZeroUsize::new_unchecked(1) })
 }
 
 /* session, options ------------------------------------------------------ */

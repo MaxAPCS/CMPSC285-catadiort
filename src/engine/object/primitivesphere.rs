@@ -2,16 +2,13 @@ use bytemuck::Zeroable;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec3, Vec3x4};
-use wide::u32x4;
-use wide::{CmpGe, CmpLt, CmpNe, f32x4, f64x4};
+use wide::{CmpGe, CmpLt, CmpNe, f32x4, f64x4, u32x4};
 
 use super::Primitive;
-use super::ray;
-use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext, WorldState};
-use crate::engine::wider;
+use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext};
+use crate::engine::{Material, ray, wider};
 
-#[derive(Clone)]
-pub(crate) struct Sphere {
+pub struct Sphere {
     /// World to Object Transform
     wotrans: Mat4,
 
@@ -20,20 +17,20 @@ pub(crate) struct Sphere {
     cutoutparams: Option<Arc<[u8]>>,
 
     /// Material Properties
-    pub material: usize,
+    material: Arc<Material>,
 }
 
 impl Primitive for Sphere {
+    #[inline]
     fn bounds(&self) -> (Vec3, Vec3) {
         let owtrans = self.wotrans.inversed();
         let center = owtrans.transform_point3(Vec3::zero());
-
-        let m = owtrans.as_array();
-        let ex = m[0].abs() + m[4].abs() + m[8].abs();
-        let ey = m[1].abs() + m[5].abs() + m[9].abs();
-        let ez = m[2].abs() + m[6].abs() + m[10].abs();
-        let half = Vec3::new(ex, ey, ez);
-
+        let owtrans = owtrans.truncate();
+        let half = Vec3::new(
+            owtrans.cols[0].mag(),
+            owtrans.cols[1].mag(),
+            owtrans.cols[2].mag(),
+        );
         (center - half, center + half)
     }
 
@@ -42,7 +39,7 @@ impl Primitive for Sphere {
         self.wotrans.inversed().extract_translation()
     }
 
-    fn obstruct(&self, ray: &ray::ShadowRay, depth: u16) -> bool {
+    fn obstruct(&self, ray: &mut ray::ShadowRay, depth: u16) {
         let ropos = self.wotrans.transform_point3(ray.pos);
         let rodir = self.wotrans.transform_vec3(ray.dir);
 
@@ -52,45 +49,60 @@ impl Primitive for Sphere {
         let discrim = b * b - a * c;
 
         if discrim < 0. {
-            return false;
+            return;
         }
 
-        let t1 = (-b - discrim.sqrt()) / a;
-
-        if t1 >= ray.max_t {
-            return false;
-        }
-
-        let opos1 = ropos + rodir * t1;
-        if (t1 > 0.)
-            & self.cutout(
-                ray.pos + ray.dir * t1,
-                ray.dir,
-                t1,
-                opos1,
-                Self::uv(opos1),
-                depth,
-            )
         {
-            return true;
+            let t1 = (-b - discrim.sqrt()) / a;
+            if t1 >= ray.max_t {
+                return;
+            }
+            let opos1 = ropos + rodir * t1;
+            let wpos1 = ray.pos + ray.dir * t1;
+            let wnorm1 = self.wotrans.transposed().transform_vec3(opos1).normalized();
+            let uv1 = Self::uv(opos1);
+            if (t1 > 0.) && self.cutout(wpos1, ray.dir, wnorm1, t1, opos1, uv1, depth) {
+                ray.hits.push(ray::Hit {
+                    opos: opos1,
+                    wpos: wpos1,
+                    wdir: ray.dir,
+                    wnorm: wnorm1,
+                    t: t1,
+                    norm: wnorm1,
+                    uv: uv1,
+                    color: Vec3::broadcast(f32::NAN),
+                    material: Some(self.material.clone()),
+                });
+            }
         }
 
         if discrim == 0. {
-            return false;
+            return;
         }
 
-        let t2 = (-b + discrim.sqrt()) / a;
-
-        let opos2 = ropos + rodir * t2;
-        (t2 > 0. && t2 < ray.max_t)
-            & self.cutout(
-                ray.pos + ray.dir * t2,
-                ray.dir,
-                t2,
-                opos2,
-                Self::uv(opos2),
-                depth,
-            )
+        {
+            let t2 = (-b + discrim.sqrt()) / a;
+            if t2 >= ray.max_t {
+                return;
+            }
+            let opos2 = ropos + rodir * t2;
+            let wpos2 = ray.pos + ray.dir * t2;
+            let wnorm2 = self.wotrans.transposed().transform_vec3(opos2).normalized();
+            let uv2 = Self::uv(opos2);
+            if (t2 > 0.) && self.cutout(wpos2, ray.dir, wnorm2, t2, opos2, uv2, depth) {
+                ray.hits.push(ray::Hit {
+                    opos: opos2,
+                    wpos: wpos2,
+                    wdir: ray.dir,
+                    wnorm: wnorm2,
+                    t: t2,
+                    norm: wnorm2,
+                    uv: uv2,
+                    color: Vec3::broadcast(f32::NAN),
+                    material: Some(self.material.clone()),
+                });
+            }
+        }
     }
 
     fn intersect(&self, rays: &mut ray::Rayx4, depth: u16) {
@@ -128,7 +140,7 @@ impl Primitive for Sphere {
                 norm: wnorm,
                 uv: uv1,
                 color: Vec3x4::broadcast(wider::f32x4_NAN),
-                material: (self.material as u32).into(),
+                material: core::array::from_fn(|_| Some(self.material.clone())),
             });
             return;
         }
@@ -160,16 +172,18 @@ impl Primitive for Sphere {
             norm: wnorm,
             uv: Self::uvx4(opos),
             color: Vec3x4::broadcast(wider::f32x4_NAN),
-            material: (self.material as u32).into(),
+            material: core::array::from_fn(|_| Some(self.material.clone())),
         })
     }
 }
 
 impl Sphere {
+    #[inline]
     fn cutout(
         &self,
         wpos: Vec3,
         wdir: Vec3,
+        wnorm: Vec3,
         t: f32,
         opos: Vec3,
         uv: (f32, f32),
@@ -178,8 +192,6 @@ impl Sphere {
         let Some(cutout) = self.cutout else {
             return true;
         };
-        let wnorm = self.wotrans.transposed().transform_vec3(opos).normalized();
-
         let mut ctx = RtShadeContext::new(
             &self.cutoutparams,
             wpos,
@@ -195,6 +207,7 @@ impl Sphere {
         (unsafe { cutout(&mut ctx) } != 0)
     }
 
+    #[inline]
     fn cutoutx4(
         &self,
         wpos: Vec3x4,
@@ -261,12 +274,18 @@ impl Sphere {
         (u, v)
     }
 
-    pub fn create(state: &WorldState, ctm: Mat4) -> Self {
+    #[inline]
+    pub(in crate::engine) fn create(
+        wotrans: Mat4,
+        cutout: RtCutoutFn,
+        cutoutparams: Option<Arc<[u8]>>,
+        material: Arc<Material>,
+    ) -> Self {
         Self {
-            wotrans: ctm.inversed(),
-            cutout: state.cutout,
-            cutoutparams: state.cutoutparams.clone(),
-            material: state.get_materialidx(),
+            wotrans,
+            cutout,
+            cutoutparams,
+            material,
         }
     }
 }

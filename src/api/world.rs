@@ -2,16 +2,15 @@ use core::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use ultraviolet::{Mat4, Vec3};
 
-use super::{transform, *};
-use crate::engine::{DirectionalLight, Material, Mesh, PointLight, Sphere, SpotLight, World};
+use super::*;
+use crate::engine::{DirectionalLight, Material, Mesh, PointLight, SpotLight, World};
 
-pub(crate) struct WorldState {
-    pub shader: Option<unsafe extern "C" fn(*mut RtShadeContext)>,
+struct WorldState {
+    pub shader: RtShaderFn,
     pub shaderparams: Option<Arc<[u8]>>,
-    pub cutout: Option<unsafe extern "C" fn(*mut RtShadeContext) -> RtInt>,
+    pub cutout: RtCutoutFn,
     pub cutoutparams: Option<Arc<[u8]>>,
 
-    material: usize,
     world: World,
 }
 
@@ -23,7 +22,6 @@ impl WorldState {
             cutout: None,
             cutoutparams: None,
 
-            material: 0,
             world: World::empty(),
         }
     }
@@ -34,29 +32,30 @@ impl WorldState {
 
     fn set_material(&mut self, material: Option<RtMaterial>) {
         let Some(material) = material else {
-            self.material = 0;
-            debug_assert_eq!(self.get_material(), RtMaterial::default_material());
+            self.world.materials.push(Material::default());
             return;
         };
-        self.material = self.world.materials.len();
-        self.world.materials.push(Material::from(
-            material,
+        let id = self.world.materials.len();
+        self.world.materials.push(Material::new(
+            id as _,
             self.shader,
             self.shaderparams.clone(),
+            material,
         ));
-        debug_assert_eq!(self.get_material(), material);
     }
 
     fn rebind_material(&mut self) {
-        self.set_material(Some(self.get_material()));
+        let id = self.world.materials.len();
+        self.world.materials.push(Material::new(
+            id as _,
+            self.shader.clone(),
+            self.shaderparams.clone(),
+            self.world.materials[id - 1].prop,
+        ));
     }
 
-    pub fn get_materialidx(&self) -> usize {
-        self.material
-    }
-
-    pub fn get_material(&self) -> RtMaterial {
-        (&self.world.materials[self.material]).into()
+    fn last_material(&self) -> &Material {
+        &self.world.materials[self.world.materials.len() - 1]
     }
 }
 
@@ -120,10 +119,10 @@ pub extern "C" fn rtPointLight(position: &Vec3, intensity: &RtColor) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rtDirectionalLight(direction: &Vec3, irradiance: &RtColor) {
+pub extern "C" fn rtDirectionalLight(direction: &Vec3, &irradiance: &RtColor) {
     let dir = transform::get().transform_vec3(*direction).normalized();
 
-    let obj = DirectionalLight::new(dir, *irradiance);
+    let obj = DirectionalLight { dir, irradiance };
     OBJECTSTATE
         .lock()
         .unwrap()
@@ -167,28 +166,19 @@ pub extern "C" fn rtSphere(radius: RtFloat) {
         return;
     }
     let ctm = transform::get();
-
     let mut os = OBJECTSTATE.lock().unwrap();
-    let obj = Sphere::create(&mut os, ctm * Mat4::from_scale(radius));
-    if let Some(pl) = PointLight::from_emissive(&obj, &os.get_material()) {
-        os.world.pointlights.push(pl);
-    }
-    os.world.spheres.push(obj);
+    let cutout = os.cutout;
+    let cutoutparams = os.cutoutparams.clone();
+    let material = Arc::new(os.last_material().clone());
+
+    os.world.sphere_create(
+        ctm * Mat4::from_scale(radius),
+        cutout,
+        cutoutparams,
+        material,
+    );
 }
 
-/// A mesh is baked instead: its vertices go through the CTM
-/// now, its normals through the inverse transpose, and only the inverse is
-/// kept, for Po (the hit point in object space, which solid shaders read)
-/// and the tangents. What the primitives of one call share (the copy, its
-/// inverse, the material and the shaders bound at the call) is one
-/// draw-call record they name by index (Intersection handout).
-
-/// ntris triangles over nverts vertices, counterclockwise from outside; N,
-/// st and Cs may be null. Vertices go through the CTM, normals through its
-/// inverse transpose; each triangle keeps its first vertex, two edges and
-/// constant tangents (Intersection handout). A mirroring CTM (a negative
-/// determinant, ctm().determinant3()) swaps the winding so the outside
-/// stays outside; a bad index skips the triangle.
 /// # Safety
 /// The arrays are as long as nverts and 3 ntris say; N, st and Cs may be null.
 #[unsafe(no_mangle)]
@@ -196,7 +186,7 @@ pub unsafe extern "C" fn rtTriangleMesh(
     nverts: RtInt,
     p: *const RtPoint,
     n: *const RtNormal,
-    st: *const (RtFloat, RtFloat),
+    st: *const [RtFloat; 2],
     cs: *const RtColor,
     ntris: RtInt,
     indexes: *const [RtInt; 3],
@@ -206,56 +196,63 @@ pub unsafe extern "C" fn rtTriangleMesh(
         println!("rtobject: skipped rtTriangleMesh with nverts {}", nverts);
         return;
     }
-    let indexes = unsafe { core::slice::from_raw_parts(indexes, ntris as usize) };
-
-    let hash = {
-        let mut hasher = std::hash::DefaultHasher::new();
-        p.hash(&mut hasher);
-        n.hash(&mut hasher);
-        st.hash(&mut hasher);
-        cs.hash(&mut hasher);
-        indexes.hash(&mut hasher);
-        hasher.finish()
-    };
-    let mut os: std::sync::MutexGuard<'_, WorldState> = OBJECTSTATE.lock().unwrap();
-    let ctm = transform::get();
-    let cutout = os.cutout;
-    let cutoutparams = os.cutoutparams.clone();
-    let material = os.get_materialidx() as _;
-    let materialobj = os.get_material();
-
-    if os
-        .world
-        .mesh_instance(hash, ctm, cutout, &cutoutparams, material, materialobj)
-    {
-        return;
-    }
 
     let nverts = nverts as usize;
-    let p = unsafe { core::slice::from_raw_parts(p, nverts) }.to_vec();
+    let p = unsafe { core::slice::from_raw_parts(p, nverts) };
     let n = if n.is_null() {
         None
     } else {
-        Some(unsafe { core::slice::from_raw_parts(n, nverts) }.to_vec())
+        Some(unsafe { core::slice::from_raw_parts(n, nverts) })
     };
     let st = if st.is_null() {
         None
     } else {
-        Some(unsafe { core::slice::from_raw_parts(st, nverts) }.to_vec())
+        Some(unsafe { core::slice::from_raw_parts(st, nverts) })
     };
     let cs = if cs.is_null() {
         None
     } else {
-        Some(unsafe { core::slice::from_raw_parts(cs, nverts) }.to_vec())
+        Some(unsafe { core::slice::from_raw_parts(cs, nverts) })
+    };
+    let indexes = unsafe { core::slice::from_raw_parts(indexes, ntris as usize) };
+
+    let hash = {
+        let mut hasher = std::hash::DefaultHasher::new();
+        let p: &[u8] = bytemuck::cast_slice(p);
+        p.hash(&mut hasher);
+        let n: &[u8] = n.map_or_default(|n| bytemuck::cast_slice(n));
+        n.hash(&mut hasher);
+        let st: &[u8] = st.map_or_default(|st| bytemuck::cast_slice(st));
+        st.hash(&mut hasher);
+        let cs: &[u8] = cs.map_or_default(|cs| bytemuck::cast_slice(cs));
+        cs.hash(&mut hasher);
+        indexes.hash(&mut hasher);
+        hasher.finish()
     };
 
-    os.world.mesh_create(
-        hash,
-        ctm,
-        cutout,
-        cutoutparams.clone(),
-        material,
-        materialobj,
-        Mesh::tricreate(indexes, p, n, cs, st),
-    );
+    let ctm = transform::get();
+    let mut os = OBJECTSTATE.lock().unwrap();
+    let cutout = os.cutout;
+    let cutoutparams = os.cutoutparams.clone();
+    let material = Arc::new(os.last_material().clone());
+
+    if !os
+        .world
+        .mesh_instance(hash, ctm, cutout, cutoutparams.clone(), material.clone())
+    {
+        os.world.mesh_create(
+            hash,
+            ctm,
+            cutout,
+            cutoutparams,
+            material,
+            Mesh::tricreate(
+                indexes,
+                p.to_vec(),
+                n.map(|n| n.to_vec()),
+                cs.map(|cs| cs.to_vec()),
+                st.map(|st| st.to_vec()),
+            ),
+        );
+    }
 }

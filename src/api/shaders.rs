@@ -10,8 +10,6 @@
 //! shader returns 0 where the surface does not exist. A shader knows
 //! nothing of lights and keeps no state (threads).
 
-#![allow(non_snake_case)] // the shaders' names are the interface's
-
 use super::*;
 use crate::utils::texture;
 

@@ -1,12 +1,12 @@
 use ultraviolet::Vec3;
 
 use super::Light;
-use super::ray::ShadowRay;
+use crate::engine::ray::ShadowRay;
 
-pub(crate) struct SpotLight {
-    pos: Vec3,
-    dir: Vec3,
-    intensity: Vec3,
+pub struct SpotLight {
+    pub pos: Vec3,
+    pub dir: Vec3,
+    pub intensity: Vec3,
     inner_cos: f32,
     outer_cos: f32,
     outer_dst: f32,
@@ -38,12 +38,7 @@ impl Light for SpotLight {
             (1. - u * u) * (1. - u * u)
         };
 
-        ShadowRay {
-            pos,
-            dir: -dir,
-            max_t: dst,
-            irradiance: self.intensity * cone * reach / dst_sq,
-        }
+        ShadowRay::new(pos, -dir, dst, self.intensity * cone * reach / dst_sq)
     }
 }
 

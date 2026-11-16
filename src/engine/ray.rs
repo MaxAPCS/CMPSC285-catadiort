@@ -1,11 +1,11 @@
+use std::sync::Arc;
 use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGt, CmpLt, f32x4, u32x4};
 
-use super::DEPTH_COMPLEXITY;
 use super::Material;
-use super::object::Primitive;
-use crate::api::RtMaterial;
-use crate::api::RtShadeContext;
+use crate::api::{RtMaterial, RtShadeContext};
+
+const DEPTH_COMPLEXITY: usize = 4;
 
 pub(super) struct Rayx4 {
     /// Worldspace Ray Origin
@@ -44,14 +44,14 @@ impl Rayx4 {
         debug_assert!(self.hits.len() <= 1);
         self.hits.pop()
     }
+}
 
-    #[cfg(feature = "bvh")]
-    #[inline]
-    pub fn closest_t(&self) -> f32x4 {
-        self.hits
-            .first()
-            .map_or(f32x4::splat(f32::INFINITY), |h| h.t)
-    }
+macro_rules! material {
+    ($material:expr) => {
+        $material
+            .as_deref()
+            .unwrap_or(const { &Material::default() })
+    };
 }
 
 pub(super) struct Hitx4 {
@@ -73,13 +73,13 @@ pub(super) struct Hitx4 {
     /// Shading Color
     pub color: Vec3x4,
     /// Shading Material
-    pub material: u32x4,
+    pub material: [Option<Arc<Material>>; 4],
 }
 
 impl Hitx4 {
     // pub(super) to give access to primitivemesh
-    pub(super) fn collapse(&mut self, other: Self) {
-        let me = (!self.t.is_nan()) & (other.t.is_nan() | self.t.cmp_lt(other.t));
+    pub(super) fn collapse(&mut self, mut other: Self) {
+        let me = (!self.t.is_nan()) & (other.t.is_nan() | other.t.cmp_gt(self.t));
 
         self.opos = Vec3x4::blend(me, self.opos, other.opos);
         self.wpos = Vec3x4::blend(me, self.wpos, other.wpos);
@@ -93,15 +93,22 @@ impl Hitx4 {
             f32x4::blend(me, self.uv.1, other.uv.1),
         );
         self.color = Vec3x4::blend(me, self.color, other.color);
-        self.material = u32x4::blend(bytemuck::cast(me), self.material, other.material);
+
+        let me: u32x4 = bytemuck::cast(me);
+        let me = me.as_array_ref();
+        for i in 0..4 {
+            if me[i] == 0 {
+                core::mem::swap(&mut self.material[i], &mut other.material[i]);
+            }
+        }
     }
 
-    pub fn shade(&self, material: &Material, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
+    pub fn shade(&mut self, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
         let hits: [Hit; 4] = self.into();
         let mut out_norms = [Vec3::zero(); 4];
         let mut out_matrs = [const { core::mem::MaybeUninit::uninit() }; 4];
         for i in 0..4 {
-            let (norm, matr) = hits[i].shade(material, depth);
+            let (norm, matr) = hits[i].shade(depth);
             out_norms[i] = norm;
             out_matrs[i].write(matr);
         }
@@ -114,7 +121,7 @@ impl Hitx4 {
     }
 
     #[inline]
-    pub fn refract(&self, material: &Material) -> (f32x4, Vec3x4) {
+    pub fn refract(&self) -> (f32x4, Vec3x4) {
         let entering = self.wdir.dot(self.wnorm).cmp_lt(f32x4::ZERO);
         let norm = Vec3x4::blend(
             self.wdir.dot(self.norm).cmp_gt(f32x4::ZERO),
@@ -122,8 +129,12 @@ impl Hitx4 {
             self.norm,
         );
         let wscale = self.wdir.mag();
-        let (medium_cos, refractdir) =
-            refractedx4(self.wdir / wscale, norm, material.ior.into(), entering);
+        let (medium_cos, refractdir) = refractedx4(
+            self.wdir / wscale,
+            norm,
+            core::array::from_fn(|i| material!(self.material[i]).prop.ior).into(),
+            entering,
+        );
         (medium_cos, refractdir * wscale)
     }
 }
@@ -147,7 +158,7 @@ fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4
     )
 }
 
-#[derive(bytemuck::Zeroable)]
+#[derive(Default)]
 pub(super) struct Hit {
     /// Objectspace Hit Position
     pub opos: Vec3,
@@ -167,15 +178,19 @@ pub(super) struct Hit {
     /// Shading Color
     pub color: Vec3,
     /// Shading Material
-    pub material: u32,
+    pub material: Option<Arc<Material>>,
 }
 
 impl Hit {
-    fn shade(&self, material: &Material, depth: u16) -> (Vec3, RtMaterial) {
-        let mut matr: RtMaterial = material.into();
+    fn shade(&self, depth: u16) -> (Vec3, RtMaterial) {
+        let material = material!(self.material);
+        let mut matr = material.prop;
         if !self.color.x.is_nan() {
             matr.albedo = self.color;
         };
+        if self.t.is_nan() {
+            return (self.norm, matr);
+        }
         let Some(shader) = material.shader else {
             return (self.norm, matr);
         };
@@ -196,7 +211,7 @@ impl Hit {
     }
 }
 
-impl Into<[Hit; 4]> for &Hitx4 {
+impl Into<[Hit; 4]> for &mut Hitx4 {
     fn into(self) -> [Hit; 4] {
         let opos: [Vec3; 4] = self.opos.into();
         let wpos: [Vec3; 4] = self.wpos.into();
@@ -207,34 +222,37 @@ impl Into<[Hit; 4]> for &Hitx4 {
         let u = self.uv.0.as_array_ref();
         let v = self.uv.1.as_array_ref();
         let color: [Vec3; 4] = self.color.into();
-        let material = self.material.as_array_ref();
 
-        core::array::from_fn(|i| Hit {
-            opos: opos[i],
-            wpos: wpos[i],
-            wdir: wdir[i],
-            wnorm: wnorm[i],
-            t: t[i],
-            norm: norm[i],
-            uv: (u[i], v[i]),
-            color: color[i],
-            material: material[i],
+        let mut i = 0;
+        core::mem::take(&mut self.material).map(|material| {
+            let h = Hit {
+                opos: opos[i],
+                wpos: wpos[i],
+                wdir: wdir[i],
+                wnorm: wnorm[i],
+                t: t[i],
+                norm: norm[i],
+                uv: (u[i], v[i]),
+                color: color[i],
+                material,
+            };
+            i += 1;
+            h
         })
     }
 }
 
 impl From<[Hit; 4]> for Hitx4 {
     fn from(value: [Hit; 4]) -> Self {
-        let opos: [Vec3; 4] = core::array::from_fn(|i| value[i].opos);
-        let wpos: [Vec3; 4] = core::array::from_fn(|i| value[i].wpos);
-        let wdir: [Vec3; 4] = core::array::from_fn(|i| value[i].wdir);
-        let wnorm: [Vec3; 4] = core::array::from_fn(|i| value[i].wnorm);
+        let opos = core::array::from_fn(|i| value[i].opos);
+        let wpos = core::array::from_fn(|i| value[i].wpos);
+        let wdir = core::array::from_fn(|i| value[i].wdir);
+        let wnorm = core::array::from_fn(|i| value[i].wnorm);
         let t: [f32; 4] = core::array::from_fn(|i| value[i].t);
         let norm: [Vec3; 4] = core::array::from_fn(|i| value[i].norm);
         let u: [f32; 4] = core::array::from_fn(|i| value[i].uv.0);
         let v: [f32; 4] = core::array::from_fn(|i| value[i].uv.1);
         let color: [Vec3; 4] = core::array::from_fn(|i| value[i].color);
-        let material: [u32; 4] = core::array::from_fn(|i| value[i].material);
 
         Self {
             opos: opos.into(),
@@ -245,7 +263,7 @@ impl From<[Hit; 4]> for Hitx4 {
             norm: norm.into(),
             uv: (u.into(), v.into()),
             color: color.into(),
-            material: material.into(),
+            material: value.map(|val| val.material),
         }
     }
 }
@@ -255,16 +273,36 @@ pub(super) struct ShadowRay {
     pub pos: Vec3,
     /// Worldspace Ray Direction
     pub dir: Vec3,
+    /// Maximum Hit Time (exclusive)
     pub max_t: f32,
+
     pub irradiance: Vec3,
+    pub hits: smallvec::SmallVec<[Hit; DEPTH_COMPLEXITY]>,
 }
 
 impl ShadowRay {
     #[inline]
-    pub fn intersect<T: Primitive>(&mut self, primitive: &T, depth: u16) -> bool {
-        if primitive.obstruct(self, depth) {
-            self.irradiance = Vec3::zero();
+    pub const fn new(pos: Vec3, dir: Vec3, max_t: f32, irradiance: Vec3) -> Self {
+        Self {
+            pos,
+            dir,
+            max_t,
+            irradiance,
+            hits: smallvec::SmallVec::new_const(),
         }
-        self.irradiance == Vec3::zero()
+    }
+
+    #[inline]
+    pub fn collapse(&mut self) {
+        for hit in core::mem::take(&mut self.hits) {
+            let material = material!(hit.material);
+            if material.prop.emits() {
+                continue;
+            }
+            self.irradiance *= material.prop.albedo * material.prop.transmission;
+            if self.irradiance.component_max() <= 0. {
+                break;
+            }
+        }
     }
 }

@@ -1,30 +1,34 @@
 use std::sync::Arc;
-
-use ultraviolet::Mat4;
-use ultraviolet::{Rotor3, Rotor3x4, Vec3, Vec3x4, Vec4, Vec4x4};
+use ultraviolet::{Mat4, Rotor3, Rotor3x4, Vec3, Vec3x4, Vec4, Vec4x4};
 use wide::f32x4;
 
-use super::object;
-use super::ray;
-use super::{Light, Material, Primitive};
-use crate::api::{RtCutoutFn, RtMaterial};
 #[cfg(feature = "bvh")]
-use crate::engine::bvh::BVH;
-use crate::engine::{MeshEmissive, from_emissive};
+use super::bvh::BVH;
+use super::{
+    Light, Material, MeshEmissive, PointLight, Primitive, Sphere, from_emissive, object, ray,
+};
+use crate::api::RtCutoutFn;
 use crate::utils::texture;
 
-pub const MEDIUM_IOR: f32 = 1.0;
+pub(crate) const MEDIUM_IOR: f32 = 1.0;
 
 pub(crate) struct World {
     pub directionallights: Vec<object::DirectionalLight>,
     planelights: Vec<object::PlaneLight>,
     pub pointlights: Vec<object::PointLight>,
     pub spotlights: Vec<object::SpotLight>,
+
+    #[cfg(not(feature = "bvh"))]
     meshes: Vec<object::Mesh>,
-    pub spheres: Vec<object::Sphere>,
+    #[cfg(feature = "bvh")]
+    meshbvh: Option<BVH<object::Mesh>>,
 
     meshtris: Vec<(u64, Box<[object::Tri]>)>,
     meshinstances: Vec<object::MeshReference>,
+
+    pub spheres: Vec<object::Sphere>,
+    #[cfg(feature = "bvh")]
+    spherebvh: Option<BVH<object::Sphere>>,
 
     pub materials: smallvec::SmallVec<[Material; 4]>,
     pub ambientcolor: Vec3,
@@ -42,11 +46,18 @@ impl World {
             planelights: Vec::new(),
             pointlights: Vec::new(),
             spotlights: Vec::new(),
+
+            #[cfg(not(feature = "bvh"))]
             meshes: Vec::new(),
-            spheres: Vec::new(),
+            #[cfg(feature = "bvh")]
+            meshbvh: None,
 
             meshtris: Vec::new(),
             meshinstances: Vec::new(),
+
+            spheres: Vec::new(),
+            #[cfg(feature = "bvh")]
+            spherebvh: None,
 
             materials: unsafe {
                 smallvec::SmallVec::from_const_with_len_unchecked(
@@ -62,22 +73,36 @@ impl World {
         }
     }
 
+    pub fn sphere_create(
+        &mut self,
+        owtrans: Mat4,
+        cutout: RtCutoutFn,
+        cutoutparams: Option<Arc<[u8]>>,
+        material: Arc<Material>,
+    ) {
+        let prop = material.prop;
+        let obj = Sphere::create(owtrans.inversed(), cutout, cutoutparams, material);
+        if let Some(pl) = PointLight::from_emissive(&obj, &prop) {
+            self.pointlights.push(pl);
+        }
+        self.spheres.push(obj);
+    }
+
     pub fn mesh_create(
         &mut self,
         hash: u64,
         owtrans: Mat4,
         cutout: RtCutoutFn,
         cutoutparams: Option<Arc<[u8]>>,
-        material: u32,
-        materialobj: RtMaterial,
-        tris: Box<[object::Tri]>,
+        material: Arc<Material>,
+        triangles: Box<[object::Tri]>,
     ) {
-        match from_emissive(&tris, owtrans.inversed().transposed(), &materialobj) {
+        match from_emissive(&triangles, owtrans, &material.prop) {
             Some(MeshEmissive::Plane(pl)) => self.planelights.push(pl),
             Some(MeshEmissive::Point(pl)) => self.pointlights.push(pl),
             None => {}
         }
-        self.meshtris.push((hash, tris));
+        self.meshtris.push((hash, triangles));
         self.meshinstances.push(object::MeshReference {
             owtrans,
             cutout,
@@ -92,18 +117,13 @@ impl World {
         hash: u64,
         owtrans: Mat4,
         cutout: RtCutoutFn,
-        cutoutparams: &Option<Arc<[u8]>>,
-        material: u32,
-        materialobj: RtMaterial,
+        cutoutparams: Option<Arc<[u8]>>,
+        material: Arc<Material>,
     ) -> bool {
         let Some(triref) = self.meshtris.iter().position(|mt| mt.0 == hash) else {
             return false;
         };
-        match from_emissive(
-            &self.meshtris[triref].1,
-            owtrans.inversed().transposed(),
-            &materialobj,
-        ) {
+        match from_emissive(&self.meshtris[triref].1, owtrans, &material.prop) {
             Some(MeshEmissive::Plane(pl)) => self.planelights.push(pl),
             Some(MeshEmissive::Point(pl)) => self.pointlights.push(pl),
             None => {}
@@ -111,7 +131,7 @@ impl World {
         self.meshinstances.push(object::MeshReference {
             owtrans,
             cutout,
-            cutoutparams: cutoutparams.clone(),
+            cutoutparams,
             material,
             triref,
         });
@@ -120,15 +140,15 @@ impl World {
 
     /// Build acceleration structures, emissive standins
     pub fn finish(&mut self) {
+        #[cfg(not(feature = "bvh"))]
+        let tris: Vec<Arc<[_]>> = self.meshtris.drain(..).map(|(_, m)| Arc::from(m)).collect();
         #[cfg(feature = "bvh")]
         let bvhs: Vec<_> = self
             .meshtris
             .drain(..)
             .map(|(_, m)| Arc::new(BVH::create(m)))
             .collect();
-        #[cfg(not(feature = "bvh"))]
-        let tris: Vec<Arc<[_]>> = self.meshtris.drain(..).map(|(_, m)| Arc::from(m)).collect();
-        self.meshes = self
+        let meshes = self
             .meshinstances
             .drain(..)
             .map(|meshref| {
@@ -142,31 +162,64 @@ impl World {
                 )
             })
             .collect();
+        #[cfg(not(feature = "bvh"))]
+        {
+            self.meshes = meshes;
+        }
+        #[cfg(feature = "bvh")]
+        {
+            self.meshbvh = Some(BVH::create(meshes));
+            self.spherebvh = Some(BVH::create(
+                core::mem::take(&mut self.spheres).into_boxed_slice(),
+            ))
+        }
     }
 
-    pub(super) fn intersect(&self, rays: &mut ray::Rayx4, depth: u16) {
-        for s in &self.spheres {
-            s.intersect(rays, depth);
+    pub(super) fn intersect(&self, ray: &mut ray::Rayx4, depth: u16) {
+        #[cfg(not(feature = "bvh"))]
+        {
+            for s in &self.spheres {
+                s.intersect(ray, depth);
+            }
+            for m in &self.meshes {
+                m.intersect(ray, depth);
+            }
         }
-        for m in &self.meshes {
-            m.intersect(rays, depth);
+        #[cfg(feature = "bvh")]
+        {
+            self.spherebvh
+                .as_ref()
+                .expect("World::intersect called before World::finish")
+                .intersect(ray, depth);
+            self.meshbvh
+                .as_ref()
+                .expect("World::intersect called before World::finish")
+                .intersect(ray, depth);
         }
     }
 
-    /// Returns:
-    /// - occluded: Whether this ray is occluded
-    pub(super) fn shadow(&self, ray: &mut ray::ShadowRay, depth: u16) -> bool {
-        for s in &self.spheres {
-            if ray.intersect(s, depth) {
-                return true;
+    pub(super) fn obstruct(&self, ray: &mut ray::ShadowRay, depth: u16) {
+        #[cfg(not(feature = "bvh"))]
+        {
+            for s in &self.spheres {
+                s.obstruct(ray, depth);
+            }
+            for m in &self.meshes {
+                m.obstruct(ray, depth);
             }
         }
-        for m in &self.meshes {
-            if ray.intersect(m, depth) {
-                return true;
-            }
+        #[cfg(feature = "bvh")]
+        {
+            self.spherebvh
+                .as_ref()
+                .expect("World::obstruct called before World::finish")
+                .obstruct(ray, depth);
+            self.meshbvh
+                .as_ref()
+                .expect("World::obstruct called before World::finish")
+                .obstruct(ray, depth);
+            ray.collapse();
         }
-        false
     }
 
     pub(super) fn shadowrays(&self, point: Vec3) -> impl Iterator<Item = ray::ShadowRay> {
