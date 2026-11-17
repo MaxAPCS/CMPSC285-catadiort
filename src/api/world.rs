@@ -35,9 +35,7 @@ impl WorldState {
             self.world.materials.push(Material::default());
             return;
         };
-        let id = self.world.materials.len();
         self.world.materials.push(Material::new(
-            id as _,
             self.shader,
             self.shaderparams.clone(),
             material,
@@ -45,12 +43,10 @@ impl WorldState {
     }
 
     fn rebind_material(&mut self) {
-        let id = self.world.materials.len();
         self.world.materials.push(Material::new(
-            id as _,
             self.shader.clone(),
             self.shaderparams.clone(),
-            self.world.materials[id - 1].prop,
+            self.last_material().prop,
         ));
     }
 

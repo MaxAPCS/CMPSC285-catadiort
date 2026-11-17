@@ -3,14 +3,17 @@
 use core::num::NonZeroU32;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use smallvec::SmallVec;
+use std::sync::LazyLock;
 use ultraviolet::Vec3;
 use wide::{CmpGe, CmpLe, CmpLt, f32x4};
 
 use super::{Primitive, ray};
-use crate::engine::wider;
+use crate::{engine::wider, options::OPTIONS};
 
 const LEAF_SIZE: usize = 4;
 const BOX_PAD: f32 = 1.0 + 4.0 * f32::EPSILON;
+const NUM_BINS: usize = 16;
+static SAH: LazyLock<bool> = LazyLock::new(|| OPTIONS.read().unwrap().bvh == "sah");
 
 pub(super) struct BVH<P: Primitive> {
     primitives: Box<[P]>,
@@ -61,25 +64,11 @@ impl<P: Primitive + Send> BVH<P> {
             return idx;
         }
 
-        let centroid_extent = centroid_bounds.max - centroid_bounds.min;
-        let axis =
-            if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
-                0
-            } else if centroid_extent.y >= centroid_extent.z {
-                1
-            } else {
-                2
-            };
-        let midpoint = 0.5 * (centroid_bounds.min[axis] + centroid_bounds.max[axis]);
-
-        let mut split = pair_partition_unstable_by(
+        let (axis, split) = split_primitive(
             &mut primitives[start..end],
             &mut prim_geom[start..end],
-            |_, geom| geom.1[axis] < midpoint,
+            &centroid_bounds,
         );
-        if split == 0 || split == leaves {
-            split = leaves / 2;
-        }
 
         let lft = Self::build(primitives, prim_geom, nodes, start, start + split);
         let rgh = Self::build(primitives, prim_geom, nodes, start + split, end);
@@ -270,7 +259,7 @@ impl Bounds {
     #[inline]
     fn surface(&self) -> f32 {
         let Vec3 { x, y, z } = self.max - self.min;
-        return 2. * (x * y + y * z + z * x);
+        2. * (x * y + y * z + z * x)
     }
 }
 
@@ -283,6 +272,115 @@ impl From<(Vec3, Vec3)> for Bounds {
             max: max + e,
         }
     }
+}
+#[inline]
+fn split_primitive<P: Primitive>(
+    primitives: &mut [P],
+    prim_geom: &mut [(Bounds, Vec3)],
+    centroid_bounds: &Bounds,
+) -> (usize, usize) {
+    if *SAH && let Some(split) = sah_split(primitives, prim_geom, centroid_bounds) {
+        return split;
+    }
+    midpoint_split(primitives, prim_geom, centroid_bounds)
+}
+
+fn midpoint_split<P: Primitive>(
+    primitives: &mut [P],
+    prim_geom: &mut [(Bounds, Vec3)],
+    centroid_bounds: &Bounds,
+) -> (usize, usize) {
+    let total = primitives.len();
+    let centroid_extent = centroid_bounds.max - centroid_bounds.min;
+    let axis = if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
+        0
+    } else if centroid_extent.y >= centroid_extent.z {
+        1
+    } else {
+        2
+    };
+
+    let midpoint = 0.5 * (centroid_bounds.min[axis] + centroid_bounds.max[axis]);
+    let mut split =
+        pair_partition_unstable_by(primitives, prim_geom, |_, geom| geom.1[axis] < midpoint);
+    if split == 0 || split == total {
+        split = total / 2;
+    }
+    (axis, split)
+}
+
+fn sah_split<P: Primitive>(
+    primitives: &mut [P],
+    prim_geom: &mut [(Bounds, Vec3)],
+    centroid_bounds: &Bounds,
+) -> Option<(usize, usize)> {
+    let total = primitives.len() as u32;
+    let centroid_extent = centroid_bounds.max - centroid_bounds.min;
+    let axis = if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
+        0
+    } else if centroid_extent.y >= centroid_extent.z {
+        1
+    } else {
+        2
+    };
+
+    let min = centroid_bounds.min[axis];
+    let extent = centroid_bounds.max[axis] - min;
+    if extent <= 0.0 || !extent.is_finite() {
+        return None;
+    }
+
+    let bin =
+        |pos: Vec3| (((pos[axis] - min) * (NUM_BINS as f32 / extent)) as usize).min(NUM_BINS - 1);
+
+    let mut bin_bounds = [Bounds::empty(); NUM_BINS];
+    let mut bin_counts = [0u32; NUM_BINS];
+    for (bounds, centroid) in prim_geom.iter() {
+        let bin = bin(*centroid);
+        bin_bounds[bin] = bin_bounds[bin].union(*bounds);
+        bin_counts[bin] += 1;
+    }
+
+    let mut best_cost = f32::INFINITY;
+    let mut split_bin = 0;
+
+    let mut right_area = [0.; NUM_BINS];
+    let mut right_acc = Bounds::empty();
+    for i in (1..NUM_BINS).rev() {
+        right_acc = right_acc.union(bin_bounds[i]);
+        right_area[i] = right_acc.surface();
+    }
+
+    let mut left_count = 0;
+    let mut left_acc = Bounds::empty();
+    for i in 1..NUM_BINS {
+        left_acc = left_acc.union(bin_bounds[i - 1]);
+        left_count += bin_counts[i - 1];
+
+        let right_count = total - left_count;
+        if left_count == 0 || right_count == 0 {
+            continue;
+        }
+
+        let cost = left_acc.surface() * left_count as f32 + right_area[i] * right_count as f32;
+        if cost < best_cost {
+            best_cost = cost;
+            split_bin = i;
+        }
+    }
+
+    if !best_cost.is_finite() {
+        return None;
+    }
+
+    let split = pair_partition_unstable_by(primitives, prim_geom, |_, geom| {
+        let bin = bin(geom.1);
+        bin < split_bin
+    });
+    if split == 0 || split == total as _ {
+        return None;
+    }
+    Some((axis, split))
 }
 
 fn pair_partition_unstable_by<T, U, F>(a: &mut [T], b: &mut [U], mut pred: F) -> usize

@@ -18,7 +18,7 @@ type RtVector = Vec3;
 type RtNormal = Vec3;
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RtMaterial {
     /// kd: diffuse reflectance per channel, 0 to 1
     pub albedo: Vec3,
@@ -57,10 +57,5 @@ impl RtMaterial {
             ior: 1.5,
             emission: Vec3::broadcast(0.),
         }
-    }
-
-    #[inline]
-    pub const fn emits(&self) -> bool {
-        self.emission.x > 0. || self.emission.y > 0. || self.emission.z > 0.
     }
 }

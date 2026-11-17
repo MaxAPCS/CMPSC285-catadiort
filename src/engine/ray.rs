@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec3, Vec3x4};
-use wide::{CmpGt, CmpLe, f32x4, u32x4};
+use wide::{CmpLe, f32x4, u32x4};
 
 use super::{Material, wider};
-use crate::api::{RtMaterial, RtShadeContext};
+use crate::{
+    api::{RtMaterial, RtShadeContext},
+    engine::MEDIUM_IOR,
+};
 
 const DEPTH_COMPLEXITY: usize = 2;
 
@@ -121,94 +124,6 @@ impl Hitx4 {
             }
         }
     }
-
-    pub fn shade(&mut self, depth: u16) -> (Vec3x4, [RtMaterial; 4]) {
-        let opos: [Vec3; 4] = self.opos.into();
-        let wpos: [Vec3; 4] = self.wpos.into();
-        let wdir: [Vec3; 4] = self.wdir.into();
-        let wnorm: [Vec3; 4] = self.wnorm.into();
-        let t = self.t.as_array_ref();
-        let norm: [Vec3; 4] = self.norm.into();
-        let u = self.uv.0.as_array_ref();
-        let v = self.uv.1.as_array_ref();
-        let color: [Vec3; 4] = self.color.into();
-
-        let mut out_norms = norm;
-        let mut out_matrs = [const { core::mem::MaybeUninit::uninit() }; 4];
-        for i in 0..4 {
-            let material = material!(self.material[i]);
-            let mut matr = material.prop;
-            if !color[i].x.is_nan() {
-                matr.albedo = color[i];
-            };
-            if t[i].is_nan() {
-                out_matrs[i].write(matr);
-                continue;
-            }
-            let Some(shader) = material.shader else {
-                out_matrs[i].write(matr);
-                continue;
-            };
-            let mut ctx = RtShadeContext::new(
-                &material.shaderparams,
-                wpos[i],
-                wdir[i],
-                wnorm[i],
-                t[i],
-                opos[i],
-                norm[i],
-                (u[i], v[i]),
-                depth,
-                matr,
-            );
-            unsafe { shader(&mut ctx) };
-            out_norms[i] = ctx.N;
-            out_matrs[i].write(ctx.m);
-        }
-        (out_norms.into(), unsafe { core::mem::transmute(out_matrs) })
-    }
-
-    #[inline]
-    pub fn reflect(&self) -> Vec3x4 {
-        self.wdir.reflected(self.norm)
-    }
-
-    #[inline]
-    pub fn refract(&self) -> (f32x4, Vec3x4) {
-        let entering = self.wdir.dot(self.wnorm).cmp_le(f32x4::ZERO);
-        let norm = Vec3x4::blend(
-            self.wdir.dot(self.norm).cmp_gt(f32x4::ZERO),
-            -self.norm,
-            self.norm,
-        );
-        let wscale = self.wdir.mag();
-        let (medium_cos, refractdir) = refractedx4(
-            self.wdir / wscale,
-            norm,
-            core::array::from_fn(|i| material!(self.material[i]).prop.ior).into(),
-            entering,
-        );
-        (medium_cos, refractdir * wscale)
-    }
-}
-
-/// Arguments:
-/// - dir: normalized, either direction
-/// - norm: normalized, away from surface
-/// - eta: object ior / medium ior
-/// Returns:
-/// - medium_cos: cosine between dir to norm on medium side
-/// - refractdir: NaN if TIR, normalized
-#[inline]
-fn refractedx4(dir: Vec3x4, norm: Vec3x4, eta: f32x4, entering: f32x4) -> (f32x4, Vec3x4) {
-    let ndi = norm.dot(dir);
-    let eta = entering.blend(eta.recip(), eta);
-    let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
-    let sqrtk = k.sqrt(); // medium side cos, or NaN on TIR
-    (
-        k.cmp_le(f32x4::ZERO).blend(f32x4::ZERO, -ndi),
-        dir.mul_add(Vec3x4::broadcast(eta), -(eta * ndi + sqrtk) * norm),
-    )
 }
 
 #[derive(Default)]
@@ -232,6 +147,96 @@ pub(super) struct Hit {
     pub color: Vec3,
     /// Shading Material
     pub material: Option<Arc<Material>>,
+}
+
+impl Hit {
+    pub fn shade(&self, depth: u16) -> (Vec3, RtMaterial) {
+        let material = material!(self.material);
+        let mut matr = material.prop;
+        if !self.color.x.is_nan() {
+            matr.albedo = self.color;
+        };
+        if self.t.is_nan() {
+            return (self.norm, matr);
+        }
+        let Some(shader) = material.shader else {
+            return (self.norm, matr);
+        };
+        let mut ctx = RtShadeContext::new(
+            &material.shaderparams,
+            self.wpos,
+            self.wdir,
+            self.wnorm,
+            self.t,
+            self.opos,
+            self.norm,
+            self.uv,
+            depth,
+            matr,
+        );
+        unsafe { shader(&mut ctx) };
+        (ctx.N, ctx.m)
+    }
+
+    #[inline]
+    pub fn reflect(&self) -> Vec3 {
+        self.wdir.reflected(self.norm)
+    }
+
+    pub fn refract(&self, ior: f32) -> (f32, Vec3) {
+        let wscale = self.wdir.mag();
+        let (fresnel, refractdir) = refraction(
+            self.wdir / wscale,
+            self.norm,
+            ior,
+            self.wdir.dot(self.wnorm) <= 0.,
+        );
+        (fresnel, refractdir * wscale)
+    }
+}
+
+/// Arguments:
+/// - dir: normalized, towards surface
+/// - norm: normalized, away from object center
+/// - object_ior: index of refraction of object
+/// Returns:
+/// - fresnel: reflection ray weight
+/// - refractdir: NaN if TIR, normalized
+#[inline]
+fn refraction(dir: Vec3, norm: Vec3, object_ior: f32, entering: bool) -> (f32, Vec3) {
+    if object_ior == MEDIUM_IOR {
+        return (0., dir);
+    }
+    let ndi = norm.dot(dir);
+    let eta = if entering {
+        MEDIUM_IOR / object_ior
+    } else {
+        object_ior / MEDIUM_IOR
+    };
+    let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
+    let sqrtk = k.sqrt();
+    (
+        if k < 0. {
+            1. // TIR
+        } else {
+            fresnel(-ndi, object_ior)
+        },
+        dir.mul_add(Vec3::broadcast(eta), -(eta * ndi + sqrtk) * norm),
+    )
+}
+
+/// Arguments:
+/// - medium_cos: cosine between incident and medium-facing normal
+/// - object_ior: index of refraction of object
+/// Returns:
+/// - fresnel: reflection ray weight
+#[inline]
+const fn fresnel(medium_cos: f32, object_ior: f32) -> f32 {
+    let f0 = (object_ior - MEDIUM_IOR) / (object_ior + MEDIUM_IOR);
+    let f0 = f0 * f0;
+    let t = 1. - medium_cos;
+    let t2 = t * t;
+    f0 + (1. - f0) * t2 * t2 * t
 }
 
 /// No-clone

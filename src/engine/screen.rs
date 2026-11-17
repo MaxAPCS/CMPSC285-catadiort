@@ -1,18 +1,17 @@
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
-    slice::ParallelSliceMut,
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
+use rayon::slice::ParallelSlice;
 use ultraviolet::{Vec3, Vec3x4};
-use wide::{CmpGt, f32x4};
+use wide::f32x4;
 
-use super::{Material, ray, wider, world};
+use super::{ray, wider, world};
 #[cfg(debug_assertions)]
 use crate::rt_trace;
 #[cfg(debug_assertions)]
 use crate::utils::debug::vec3_display;
 
 const RECAST_EPSILON: f32 = 1e-4;
-const RECAST_EPSILON_X4: wide::f32x4 = wide::f32x4::new([RECAST_EPSILON; _]);
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
 pub(crate) struct Screen {
@@ -95,7 +94,6 @@ impl Screen {
                 &mut self.raystwo,
                 world,
                 depth,
-                depth == max_depth,
                 #[cfg(debug_assertions)]
                 self.width,
             );
@@ -108,7 +106,6 @@ impl Screen {
                 &mut self.raysone,
                 world,
                 depth + 1,
-                depth + 1 == max_depth,
                 #[cfg(debug_assertions)]
                 self.width,
             );
@@ -128,7 +125,6 @@ impl Screen {
         dst: &mut RayBuf,
         world: &world::World,
         depth: u16,
-        last_pass: bool,
         #[cfg(debug_assertions)] width: u32,
     ) {
         debug_assert!(!src.is_empty() && dst.is_empty());
@@ -139,192 +135,135 @@ impl Screen {
             rays.collapse();
         });
 
-        // Process Misses
-        let srchits_est = src.len() * 3;
-        let mut srchits = Vec::with_capacity(srchits_est);
-        src.into_iter().for_each(|(idxs, wghs, rays)| {
-            let wghs: [Vec3; 4] = (*wghs).into();
-            let Some(hits) = rays.get() else {
-                let env: [Vec3; 4] = world.sample_environmentx4(rays.dir).into();
-                for i in 0..4 {
-                    if wghs[i].component_max() <= 0. {
+        let mut contribs = Vec::with_capacity(src.len());
+        let mut children = Vec::with_capacity(src.len() / 2);
+        src.into_par_iter()
+            .map(|(idxs, wghs, rays)| {
+                let mut children = smallvec::SmallVec::<[_; 12]>::new();
+                let Some(hits) = rays.get() else {
+                    return (
+                        (*idxs, (*wghs * world.sample_environmentx4(rays.dir)).into()),
+                        children,
+                    );
+                };
+                let mut out = [Vec3::zero(); 4];
+                let wghs: [Vec3; 4] = (*wghs).into();
+                let hits: [ray::Hit; 4] = hits.into();
+                for (i, mut hit) in hits.into_iter().enumerate() {
+                    let idx = idxs[i];
+                    let wgh = wghs[i];
+
+                    if wgh.component_max() <= 0. {
                         continue;
                     }
-                    frame[idxs[i] as usize] += wghs[i] * env[i];
-                }
-                return;
-            };
-            let hits: [ray::Hit; 4] = hits.into();
-            for (i, hit) in hits.into_iter().enumerate() {
-                if wghs[i].component_max() <= 0. {
-                    continue;
-                }
-                if hit.t.is_nan() {
-                    frame[idxs[i] as usize] += wghs[i] * world.sample_environment(hit.wdir);
-                    continue;
-                }
-                #[cfg(debug_assertions)]
-                {
-                    rt_trace!(
-                        idxs[i] / width,
-                        idxs[i] % width,
-                        "depth {}: hit prim p t={} P=({}) N=({}) Ng=({}) {}",
-                        depth,
-                        hit.t,
-                        vec3_display(hit.wpos),
-                        vec3_display(hit.norm),
-                        vec3_display(hit.wnorm),
-                        if hit.wnorm.dot(hit.wdir) < 0. {
-                            "entering"
-                        } else {
-                            "leaving"
-                        }
-                    );
-                }
-                srchits.push((idxs[i], wghs[i], hit));
-            }
-        });
-        srchits.par_sort_unstable_by_key(|l| l.2.material.as_ref().map_or_default(|m| m.id));
-
-        // Group Hits
-        let srchitx4s_est = srchits.len() * 3 / 10;
-        let mut srchitx4s: Vec<([u32; 4], Vec3x4, ray::Hitx4)> = Vec::with_capacity(srchitx4s_est);
-        {
-            let mut group: wider::Accum4<Vec3, ray::Hit> = wider::Accum4::new();
-            for (idx, wgh, hit) in srchits {
-                if let Some(peek) = group.peek()
-                    && peek.2.material.as_ref().map_or_default(|m| m.id)
-                        != hit.material.as_ref().map_or_default(|m| m.id)
-                {
-                    let flush = unsafe { group.flush(Vec3::zero()).unwrap_unchecked() };
-                    srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
-                }
-                if group.push(idx, wgh, hit) {
-                    let flush = group.pop();
-                    srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
-                };
-            }
-            if let Some(flush) = group.flush(Vec3::zero()) {
-                srchitx4s.push((flush.0, flush.1.into(), flush.2.into()));
-            }
-        }
-
-        // Shade Hits
-        srchitx4s.par_iter_mut().for_each(|(_, wghs, hits)| {
-            hits.norm = wider::copysignx4(hits.norm, -hits.wdir);
-            let (norm, matrs) = hits.shade(depth);
-            hits.norm = wider::copysignx4(norm.normalized(), -hits.wdir); // write back shader norms
-
-            let mut contribs = [Vec3::zero(); 4];
-            let wnorm: [Vec3; 4] = hits.wnorm.into();
-            let wpos: [Vec3; 4] = hits.wpos.into();
-            let wdir: [Vec3; 4] = hits.wdir.into();
-            let norm: [Vec3; 4] = hits.norm.into();
-            let wghsa: [Vec3; 4] = (*wghs).into();
-
-            for i in 0..4 {
-                if wghsa[i].component_max() <= 0.0 {
-                    continue;
-                }
-                let shadowrays = world.shadowrays(wpos[i]).filter_map(|mut sr| {
-                    if sr.dir.dot(norm[i]) <= 0.0 || sr.obstructed() {
-                        return None;
+                    if hit.t.is_nan() {
+                        out[i] = wgh * world.sample_environment(hit.wdir);
+                        continue;
                     }
-                    sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
-                    world.obstruct(&mut sr, u16::MAX);
-                    if sr.obstructed() { None } else { Some(sr) }
-                });
-                contribs[i] = matrs[i].color(shadowrays, norm[i], wdir[i], world.ambientcolor);
-            }
-            let contribs: Vec3x4 = contribs.into();
-            hits.color = contribs * *wghs; // write contribs into hit colors
-        });
 
-        // Write Colors
-        srchitx4s.iter().for_each(
-            |&(
-                idxs,
-                _,
-                ray::Hitx4 {
-                    color: contribs, ..
-                },
-            )| {
-                let contribs: [Vec3; 4] = contribs.into();
-                for i in 0..4 {
-                    frame[idxs[i] as usize] += contribs[i];
-                }
-            },
-        );
+                    #[cfg(debug_assertions)]
+                    {
+                        rt_trace!(
+                            idx / width,
+                            idx % width,
+                            "depth {}: hit prim p t={} P=({}) N=({}) Ng=({}) {}",
+                            depth,
+                            hit.t,
+                            vec3_display(hit.wpos),
+                            vec3_display(hit.norm),
+                            vec3_display(hit.wnorm),
+                            if hit.wnorm.dot(hit.wdir) < 0. {
+                                "entering"
+                            } else {
+                                "leaving"
+                            }
+                        );
+                    }
 
-        if last_pass {
-            return;
-        }
+                    // Shade
+                    hit.norm = wider::copysign(hit.norm, -hit.wdir);
+                    let (norm, matr) = hit.shade(depth);
+                    hit.norm = wider::copysign(norm.normalized(), -hit.wdir); // write back shader norms
 
-        // Write Secondary Rays
-        *dst = srchitx4s
-            .into_par_iter()
-            .flat_map_iter(|(idxs, wghs, hits)| {
-                // FIXME use post-shading material
-                let material = hits.material[0]
-                    .as_deref()
-                    .unwrap_or(const { &Material::default() });
+                    // Color
+                    let shadowrays = world.shadowrays(hit.wpos).filter_map(|mut sr| {
+                        if sr.dir.dot(hit.norm) <= 0.0 || sr.obstructed() {
+                            return None;
+                        }
+                        sr.pos += wider::copysign(hit.wnorm * RECAST_EPSILON, sr.dir);
+                        world.obstruct(&mut sr, u16::MAX);
+                        if sr.obstructed() { None } else { Some(sr) }
+                    });
+                    out[i] = wgh * matr.color(shadowrays, hit.norm, hit.wdir, world.ambientcolor);
 
-                let mut children = smallvec::SmallVec::<[_; 3]>::new();
-                if material.reflects() {
-                    let nwgh = Vec3x4::splat(material.prop.specular * material.smoothness());
-                    let twgh = wghs * nwgh;
-
-                    if twgh.component_max().cmp_gt(f32x4::ZERO).any() {
-                        let reflectdir = hits.reflect();
+                    // Reflect
+                    if matr.reflects() {
+                        let reflectdir = hit.reflect();
                         children.push((
-                            idxs,
-                            twgh,
-                            ray::Rayx4::new(
-                                hits.wpos
-                                    + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
-                                reflectdir,
-                            ),
+                            idx,
+                            wgh * matr.specular * matr.smoothness(),
+                            hit.wpos + wider::copysign(hit.wnorm, reflectdir) * RECAST_EPSILON,
+                            reflectdir,
                         ))
                     }
-                }
-                if material.refracts() {
-                    let (ndi, refractdir) = hits.refract();
-                    let reflectwgh = f32x4::blend(
-                        refractdir.x.is_nan(),
-                        f32x4::ONE,
-                        Material::fresnelx4(ndi, material.prop.ior.into()),
-                    );
 
-                    // if material.specular.component_max() > 0. {
-                    let reflectdir = hits.reflect();
-                    children.push((
-                        idxs,
-                        wghs * Vec3x4::splat(material.prop.specular)
-                            * Vec3x4::broadcast(reflectwgh),
-                        ray::Rayx4::new(
-                            hits.wpos
-                                + wider::copysignx4(hits.wnorm, reflectdir) * RECAST_EPSILON_X4,
-                            reflectdir,
-                        ),
-                    ));
-                    // }
-
-                    if !refractdir.x.is_nan().all() {
+                    // Refract
+                    if matr.refracts() {
+                        let (reflectwgh, refractdir) = hit.refract(matr.ior);
+                        let reflectdir = hit.reflect();
                         children.push((
-                            idxs,
-                            wghs * (f32x4::ONE - reflectwgh)
-                                * f32x4::splat(material.prop.transmission),
-                            ray::Rayx4::new(
-                                hits.wpos
-                                    + wider::copysignx4(hits.wnorm, refractdir) * RECAST_EPSILON_X4,
-                                refractdir,
-                            ),
+                            idx,
+                            wgh * matr.specular * reflectwgh,
+                            hit.wpos + wider::copysign(hit.wnorm, reflectdir) * RECAST_EPSILON,
+                            reflectdir,
                         ));
+                        if !refractdir.x.is_nan() {
+                            children.push((
+                                idx,
+                                wgh * matr.transmission * (1. - reflectwgh),
+                                hit.wpos + wider::copysign(hit.wnorm, refractdir) * RECAST_EPSILON,
+                                refractdir,
+                            ));
+                        }
                     }
                 }
-                children
+                ((*idxs, out), children)
+            })
+            .unzip_into_vecs(&mut contribs, &mut children);
+
+        // Write Colors
+        contribs.into_iter().for_each(|(idxs, contribs)| {
+            for i in 0..4 {
+                frame[idxs[i] as usize] += contribs[i];
+            }
+        });
+
+        // Serialize Children
+        let children: Vec<_> = children.into_par_iter().flatten_iter().collect();
+        let children = children.par_chunks_exact(4);
+        let rem = children.remainder();
+        *dst = children
+            .map(|chunk| {
+                (
+                    core::array::from_fn(|i| chunk[i].0),
+                    core::array::from_fn(|i| chunk[i].1).into(),
+                    ray::Rayx4::new(
+                        core::array::from_fn(|i| chunk[i].2).into(),
+                        core::array::from_fn(|i| chunk[i].3).into(),
+                    ),
+                )
             })
             .collect();
+        if !rem.is_empty() {
+            dst.push((
+                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.0)),
+                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.1)).into(),
+                ray::Rayx4::new(
+                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.2)).into(),
+                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.3)).into(),
+                ),
+            ));
+        }
 
         #[cfg(debug_assertions)]
         println!("screen: pass count src {} dst {}", src.len(), dst.len());
