@@ -3,6 +3,8 @@
 ## Build
 `cargo build --release`
 
+Switches are gated behind compile flags. For brute-force, use `--no-default-features`. For each aov view, use the respective `-F aov___`.
+
 Artifact can be found at [target/release/catadiort](target/release/catadiort)
 
 ## Execution
@@ -51,24 +53,7 @@ there so the same scene renders under the later integrators unchanged.
 
     TIME Sponza build=0.412 render=3.871 total=4.283 threads=8
 
-`build` is the acceleration structure, `render` the pixel loop, `total`
-includes writing the image. The leaderboard runs the benchmark and hero
-scenes at 1920 x 1080 on 8 threads, three times each, and ranks the
-median of `build + render` (not `total`, which includes the given PNG
-writer) by its geometric mean over the scenes, after checking each image
-against the reference with `tools/compare.py`. The handout has the
-details and the threshold. The reference renderer's own times are on the
-leaderboard too; it instances a mesh drawn many times (Forest's trees)
-instead of baking every copy, which is extra credit for you, and so is
-beating its times. `--no-accel` renders without the acceleration
-structure, for the timing table of the write-up; `--time-limit S` makes
-that affordable: brute force would take hours to days per frame, so it
-renders for S seconds and its `LIMIT` line estimates the whole frame.
-`python tools/timing_table.py` produces that table: every benchmark and
-hero scene at the benchmark's settings with the SAH builder, the
-midpoint builder, and brute force for five minutes, whose estimate is
-the brute-force column (`--runs 3` for the benchmark's median of the
-builders); the Suggested Workflow's step 18 says when.
+`build` is the acceleration structure, `render` the pixel loop, `total` includes writing the image.
 
 ## Comparing against the reference
 
@@ -76,17 +61,15 @@ builders); the Suggested Workflow's step 18 says when.
 
 compares every image you have rendered against its reference: the RMSE
 of the pixel values, pass or fail against the scene's threshold, and a
-difference image beside each failing one. `--aov normal` and the other
-debug images, and `--trace X Y` with the reference library when it is
-made available, are the tools for finding out why.
+difference image beside each failing one.
 
 ## Footnotes
 
 This project in total was extremely challenging. I may have overscoped by attempting to complete the entire thing with SIMD, and spent a long time perfecting the architecture to ensure everything went smoothly. In particular, it was challenging to hunt down very specific bugs in NaN handling (which I used as a sentinel for empty lanes). I think that I had a good shot, but didn't end up having enough time to complete what I wanted to.
 
-There is no BVH. I was not able to finish in time, and am at the end of my rope. 
-
 **Extra Credit:**
-- Ground-up SoA SIMD Architecture
+- Full SIMD Intersections (10)
+- Mesh Instancing and Two-Layer BVH (10)
+- Tinted Transparent Shadows (3)
 
 AI was used strictly to debug/check for errors. All code written by hand.
