@@ -46,9 +46,7 @@ pub fn from_emissive(
 
     let owtrans_dual = owtrans.transposed().inversed();
     let wcen = owtrans.transform_point3(Mesh::tricentroid(triangles));
-    let wnorm0 = owtrans_dual
-        .transform_vec3(triangles[0].operp())
-        .normalized();
+    let wnorm0 = owtrans_dual.transform_vec3(triangles[0].onorm).normalized();
     let mut flat = true;
     let mut doublearea = 0.;
     for tri in triangles {

@@ -1,16 +1,16 @@
-use bytemuck::Zeroable;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec3, Vec3x4};
 use wide::{CmpGe, CmpLt, CmpNe, f32x4, f64x4, u32x4};
 
 use super::Primitive;
-use crate::api::{RtCutoutFn, RtMaterial, RtShadeContext};
+use crate::api::{RtCutoutFn, RtShadeContext};
 use crate::engine::{Material, ray, wider};
 
 pub struct Sphere {
     /// World to Object Transform
     wotrans: Mat4,
+    /// Dual of Object to World Transform
+    owtrans_dual: Mat4,
 
     /// Cutout Shader Reference
     cutout: RtCutoutFn,
@@ -59,7 +59,7 @@ impl Primitive for Sphere {
             }
             let opos1 = ropos + rodir * t1;
             let wpos1 = ray.pos + ray.dir * t1;
-            let wnorm1 = self.wotrans.transposed().transform_vec3(opos1).normalized();
+            let wnorm1 = self.owtrans_dual.transform_vec3(opos1).normalized();
             let uv1 = Self::uv(opos1);
             if (t1 > 0.) && self.cutout(wpos1, ray.dir, wnorm1, t1, opos1, uv1, depth) {
                 ray.hits.push(ray::Hit {
@@ -87,7 +87,7 @@ impl Primitive for Sphere {
             }
             let opos2 = ropos + rodir * t2;
             let wpos2 = ray.pos + ray.dir * t2;
-            let wnorm2 = self.wotrans.transposed().transform_vec3(opos2).normalized();
+            let wnorm2 = self.owtrans_dual.transform_vec3(opos2).normalized();
             let uv2 = Self::uv(opos2);
             if (t2 > 0.) && self.cutout(wpos2, ray.dir, wnorm2, t2, opos2, uv2, depth) {
                 ray.hits.push(ray::Hit {
@@ -130,8 +130,11 @@ impl Primitive for Sphere {
         let m1 = t1.cmp_ge(f32x4::ZERO) & self.cutoutx4(wpos1, rays.dir, t1, opos1, uv1, depth);
 
         if m1.all() {
-            let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos1).normalized();
-            rays.hits.push(ray::Hitx4 {
+            let wnorm = wider::transform_vecx4(&self.owtrans_dual, opos1).normalized();
+            if t1.cmp_ge(rays.max_t).all() {
+                return;
+            }
+            rays.push(ray::Hitx4 {
                 opos: opos1,
                 wpos: wpos1,
                 wdir: rays.dir,
@@ -147,30 +150,31 @@ impl Primitive for Sphere {
 
         let t2 = wider::cast_f32((-b + discrim.sqrt()) / a);
         let opos2 = ropos + rodir * t2;
+        let uv2 = Self::uvx4(opos2);
 
         let m2 = wider::cast_f32(discrim.cmp_ne(f64x4::ZERO))
             & t2.cmp_ge(f32x4::ZERO)
-            & self.cutoutx4(
-                rays.pos + rays.dir * t2,
-                rays.dir,
-                t2,
-                opos2,
-                Self::uvx4(opos2),
-                depth,
-            );
+            & self.cutoutx4(rays.pos + rays.dir * t2, rays.dir, t2, opos2, uv2, depth);
 
         let t = m1.blend(t1, m2.blend(t2, wider::f32x4_NAN));
+        if t.cmp_ge(rays.max_t).all() {
+            return;
+        }
         let opos = ropos + rodir * t;
-        let wnorm = wider::transform_vecx4(&self.wotrans.transposed(), opos).normalized();
+        let wnorm = wider::transform_vecx4(&self.owtrans_dual, opos).normalized();
+        let uv = (
+            f32x4::blend(m1, uv1.0, uv2.0),
+            f32x4::blend(m1, uv1.1, uv2.1),
+        );
 
-        rays.hits.push(ray::Hitx4 {
+        rays.push(ray::Hitx4 {
             opos,
             wpos: rays.pos + rays.dir * t,
             wdir: rays.dir,
             wnorm,
             t,
             norm: wnorm,
-            uv: Self::uvx4(opos),
+            uv,
             color: Vec3x4::broadcast(wider::f32x4_NAN),
             material: core::array::from_fn(|_| Some(self.material.clone())),
         })
@@ -202,7 +206,7 @@ impl Sphere {
             wnorm,
             uv,
             depth,
-            RtMaterial::zeroed(), // todo: grab the actual material
+            self.material.prop,
         );
         (unsafe { cutout(&mut ctx) } != 0)
     }
@@ -223,7 +227,7 @@ impl Sphere {
 
         let wpos: [Vec3; 4] = wpos.into();
         let wdir: [Vec3; 4] = wdir.into();
-        let wnorm: [Vec3; 4] = wider::transform_vecx4(&self.wotrans.transposed(), opos)
+        let wnorm: [Vec3; 4] = wider::transform_vecx4(&self.owtrans_dual, opos)
             .normalized()
             .into();
         let t = t.as_array_ref();
@@ -231,7 +235,7 @@ impl Sphere {
         let (u, v) = (uv.0.as_array_ref(), uv.1.as_array_ref());
 
         let mut out = [u32::MAX; 4];
-        out.par_iter_mut().enumerate().for_each(|(i, out)| {
+        for i in 0..4 {
             let mut ctx = RtShadeContext::new(
                 &self.cutoutparams,
                 wpos[i],
@@ -242,12 +246,12 @@ impl Sphere {
                 wnorm[i],
                 (u[i], v[i]),
                 depth,
-                RtMaterial::zeroed(), // todo: grab the actual material
+                self.material.prop,
             );
             if unsafe { cutout(&mut ctx) } == 0 {
-                *out = 0
+                out[i] = 0
             }
-        });
+        }
         let out: u32x4 = out.into();
         bytemuck::cast(out)
     }
@@ -276,13 +280,15 @@ impl Sphere {
 
     #[inline]
     pub(in crate::engine) fn create(
-        wotrans: Mat4,
+        owtrans: Mat4,
         cutout: RtCutoutFn,
         cutoutparams: Option<Arc<[u8]>>,
         material: Arc<Material>,
     ) -> Self {
+        let wotrans = owtrans.inversed();
         Self {
             wotrans,
+            owtrans_dual: wotrans.transposed(),
             cutout,
             cutoutparams,
             material,

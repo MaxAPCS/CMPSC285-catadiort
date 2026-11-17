@@ -204,9 +204,10 @@ fn sample(handle: i32, s: f32, t: f32, wrap_rows: bool) -> Vec4 {
         let (fx0, fy0) = (x.floor(), y.floor());
         let (ax, ay) = (x - fx0, y - fy0);
         let x0 = wrap(fx0 as i32, tex.w);
-        let x1 = wrap(fx0 as i32 + 1, tex.w);
+        let x1 = wrap(x0 + 1, tex.w);
         let (y0, y1) = if wrap_rows {
-            (wrap(fy0 as i32, tex.h), wrap(fy0 as i32 + 1, tex.h))
+            let y0 = wrap(fy0 as i32, tex.h);
+            (y0, wrap(y0 + 1, tex.h))
         } else {
             (
                 (fy0 as i32).clamp(0, tex.h - 1),
@@ -249,6 +250,9 @@ fn sample(handle: i32, s: f32, t: f32, wrap_rows: bool) -> Vec4 {
 /// bottom. Alpha is 1 when the image has none. An invalid handle reads
 /// opaque black.
 pub fn lookup(handle: i32, s: f32, t: f32) -> Vec4 {
+    if t >= i32::MAX as _ {
+        panic!("lookup fault");
+    }
     sample(handle, s, t, true)
 }
 

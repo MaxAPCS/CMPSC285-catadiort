@@ -1,13 +1,16 @@
 #![cfg(feature = "bvh")]
 
-use rayon::slice::ParallelSliceMut;
+use core::num::NonZeroU32;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use smallvec::SmallVec;
 use ultraviolet::Vec3;
-use wide::{CmpGe, CmpLe, f32x4};
+use wide::{CmpGe, CmpLe, CmpLt, f32x4};
 
 use super::{Primitive, ray};
+use crate::engine::wider;
 
 const LEAF_SIZE: usize = 4;
+const BOX_PAD: f32 = 1.0 + 4.0 * f32::EPSILON;
 
 pub(super) struct BVH<P: Primitive> {
     primitives: Box<[P]>,
@@ -15,70 +18,76 @@ pub(super) struct BVH<P: Primitive> {
 }
 
 impl<P: Primitive + Send> BVH<P> {
-    pub fn create(primitives: Box<[P]>) -> Self {
-        let mut primitives = primitives;
-        let mut nodes = Vec::with_capacity(primitives.len().saturating_mul(2));
+    pub fn create(mut primitives: Box<[P]>) -> Self {
+        let len = primitives.len();
+        let mut nodes = Vec::with_capacity(len.saturating_mul(2));
         if !primitives.is_empty() {
-            let end = primitives.len();
-            Self::build(&mut primitives, &mut nodes, 0, end);
+            let mut prim_geom: Box<[_]> = primitives
+                .par_iter_mut()
+                .map(|prim| (Bounds::from(prim.bounds()), prim.centroid()))
+                .collect();
+            Self::build(&mut primitives, &mut prim_geom, &mut nodes, 0, len);
         }
         Self { primitives, nodes }
     }
 
-    fn build(primitives: &mut [P], nodes: &mut Vec<Node>, start: usize, end: usize) -> u32 {
+    fn build(
+        primitives: &mut [P],
+        prim_geom: &mut [(Bounds, Vec3)],
+        nodes: &mut Vec<Node>,
+        start: usize,
+        end: usize,
+    ) -> u32 {
         debug_assert!(start < end);
 
-        let mut bounds = Bounds::empty();
+        let mut full_bounds = Bounds::empty();
         let mut centroid_bounds = Bounds::empty();
-        for p in &primitives[start..end] {
-            let (pmin, pmax) = p.bounds();
-            bounds = bounds.union(Bounds {
-                min: pmin,
-                max: pmax,
-            });
-            centroid_bounds = centroid_bounds.expand(p.centroid());
+        for i in start..end {
+            full_bounds = full_bounds.union(prim_geom[i].0);
+            centroid_bounds = centroid_bounds.expand(prim_geom[i].1);
         }
 
+        let leaves = end - start;
         let idx = nodes.len() as u32;
         nodes.push(Node {
-            bounds,
+            bounds: full_bounds,
             kind: NodeKind::Leaf {
                 start: start as u32,
-                len: (end - start) as u32,
+                len: unsafe { NonZeroU32::new_unchecked(leaves as _) },
             },
         });
 
-        let leaves = end - start;
         if leaves <= LEAF_SIZE {
             return idx;
         }
 
-        let extent = centroid_bounds.max - centroid_bounds.min;
-        let axis = if extent.x >= extent.y && extent.x >= extent.z {
-            0
-        } else if extent.y >= extent.z {
-            1
-        } else {
-            2
-        };
+        let centroid_extent = centroid_bounds.max - centroid_bounds.min;
+        let axis =
+            if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
+                0
+            } else if centroid_extent.y >= centroid_extent.z {
+                1
+            } else {
+                2
+            };
         let midpoint = 0.5 * (centroid_bounds.min[axis] + centroid_bounds.max[axis]);
 
-        // sort by centroids
-        primitives[start..end].par_sort_by(|a, b| {
-            a.centroid()[axis]
-                .partial_cmp(&b.centroid()[axis])
-                .unwrap_or(core::cmp::Ordering::Equal)
-        });
-
-        let mut split = primitives[start..end].partition_point(|p| p.centroid()[axis] < midpoint);
-        // fall back
+        let mut split = pair_partition_unstable_by(
+            &mut primitives[start..end],
+            &mut prim_geom[start..end],
+            |_, geom| geom.1[axis] < midpoint,
+        );
         if split == 0 || split == leaves {
             split = leaves / 2;
         }
 
-        let lft = Self::build(primitives, nodes, start, start + split);
-        let rgh = Self::build(primitives, nodes, start + split, end);
-        nodes[idx as usize].kind = NodeKind::Internal { lft, rgh };
+        let lft = Self::build(primitives, prim_geom, nodes, start, start + split);
+        let rgh = Self::build(primitives, prim_geom, nodes, start + split, end);
+        debug_assert_eq!(lft, idx + 1);
+        nodes[idx as usize].kind = NodeKind::Internal {
+            rgh,
+            axis: Axis::from(axis),
+        };
         idx
     }
 }
@@ -112,12 +121,13 @@ impl<P: Primitive> Primitive for BVH<P> {
             }
             match node.kind {
                 NodeKind::Leaf { start, len } => {
-                    for prim in &self.primitives[start as usize..(start + len) as usize] {
+                    let start = start as usize;
+                    for prim in &self.primitives[start..start + len.get() as usize] {
                         prim.obstruct(ray, depth);
                     }
                 }
-                NodeKind::Internal { lft, rgh } => {
-                    stack.push(lft);
+                NodeKind::Internal { rgh, .. } => {
+                    stack.push(idx + 1);
                     stack.push(rgh);
                 }
             }
@@ -132,18 +142,25 @@ impl<P: Primitive> Primitive for BVH<P> {
         let mut stack: SmallVec<[u32; 64]> = SmallVec::from_slice(&[0]);
         while let Some(idx) = stack.pop() {
             let node = &self.nodes[idx as usize];
-            if node.bounds.intersectx4(rays).none() {
+            let ixt = node.bounds.intersectx4(rays);
+            if ixt.cmp_lt(rays.max_t).none() {
                 continue;
             }
             match node.kind {
                 NodeKind::Leaf { start, len } => {
-                    for prim in &self.primitives[start as usize..(start + len) as usize] {
+                    let start = start as usize;
+                    for prim in &self.primitives[start..start + len.get() as usize] {
                         prim.intersect(rays, depth);
                     }
                 }
-                NodeKind::Internal { lft, rgh } => {
-                    stack.push(lft);
-                    stack.push(rgh);
+                NodeKind::Internal { rgh, axis } => {
+                    if rays.dir[axis as usize].as_array_ref()[0] >= 0. {
+                        stack.push(rgh);
+                        stack.push(idx + 1);
+                    } else {
+                        stack.push(idx + 1);
+                        stack.push(rgh);
+                    }
                 }
             }
         }
@@ -159,15 +176,34 @@ struct Node {
 #[derive(Clone, Copy)]
 enum NodeKind {
     /// Primitive Index Start & Length
-    Leaf { start: u32, len: u32 },
+    Leaf { start: u32, len: NonZeroU32 },
     /// Child Indexes
-    Internal { lft: u32, rgh: u32 },
+    Internal { rgh: u32, axis: Axis },
 }
 
 #[derive(Clone, Copy)]
 struct Bounds {
     min: Vec3,
     max: Vec3,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy)]
+enum Axis {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
+
+impl From<usize> for Axis {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => Self::X,
+            1 => Self::Y,
+            2 => Self::Z,
+            _ => panic!(),
+        }
+    }
 }
 
 impl Bounds {
@@ -179,9 +215,11 @@ impl Bounds {
             近 = 近.max(tl.min(th));
             远 = 远.min(tl.max(th));
         }
+        远 *= BOX_PAD;
         (近 <= 远) && (0. < 远) && (近 < ray.max_t)
     }
 
+    /// Returns: near hit t, or NaN
     fn intersectx4(&self, ray: &ray::Rayx4) -> f32x4 {
         let (mut 近, mut 远) = (f32x4::splat(f32::NEG_INFINITY), f32x4::splat(f32::INFINITY));
         for axis in 0..3 {
@@ -190,7 +228,9 @@ impl Bounds {
             近 = 近.max(tl.min(th));
             远 = 远.min(tl.max(th));
         }
-        近.cmp_le(远) & 远.cmp_ge(f32x4::ZERO)
+        远 *= f32x4::splat(BOX_PAD);
+        let m = 近.cmp_le(远) & 远.cmp_ge(f32x4::ZERO);
+        m.blend(近, wider::f32x4_NAN)
     }
 
     #[inline]
@@ -226,4 +266,44 @@ impl Bounds {
     fn centroid(&self) -> Vec3 {
         (self.min + self.max) / 2.
     }
+
+    #[inline]
+    fn surface(&self) -> f32 {
+        let Vec3 { x, y, z } = self.max - self.min;
+        return 2. * (x * y + y * z + z * x);
+    }
+}
+
+impl From<(Vec3, Vec3)> for Bounds {
+    fn from((min, max): (Vec3, Vec3)) -> Self {
+        let m = min.abs().max_by_component(max.abs());
+        let e = m * (16. * f32::EPSILON);
+        Self {
+            min: min - e,
+            max: max + e,
+        }
+    }
+}
+
+fn pair_partition_unstable_by<T, U, F>(a: &mut [T], b: &mut [U], mut pred: F) -> usize
+where
+    F: FnMut(&T, &U) -> bool,
+{
+    debug_assert_eq!(a.len(), b.len(), "slices must be the same length");
+
+    let mut lo = 0;
+    let mut hi = a.len();
+    while lo < hi {
+        if pred(&a[lo], &b[lo]) {
+            lo += 1;
+        } else {
+            hi -= 1;
+            if lo < hi {
+                // fix order
+                a.swap(lo, hi);
+                b.swap(lo, hi);
+            }
+        }
+    }
+    lo
 }

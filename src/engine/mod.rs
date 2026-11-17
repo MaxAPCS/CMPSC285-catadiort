@@ -28,7 +28,7 @@ pub(crate) struct Material {
 impl Material {
     #[inline]
     const fn reflects(&self) -> bool {
-        const SQRT_0D15: f32 = 0.3872983346207416885179265399782399610832921705291590826587;
+        const SQRT_0D15: f32 = 0.38729835;
 
         self.prop.transmission == 0.
             && self.prop.roughness < SQRT_0D15
@@ -41,13 +41,8 @@ impl Material {
     }
 
     #[inline]
-    const fn emits(&self) -> bool {
-        self.prop.emits()
-    }
-
-    #[inline]
     const fn smoothness(&self) -> f32 {
-        const RECIP_0D15: f32 = 6.6666666666666666666666666666666666666666666666666666666666666666;
+        const RECIP_0D15: f32 = 0.15f32.recip();
 
         (1. - self.prop.roughness * self.prop.roughness * RECIP_0D15).max(0.)
     }
@@ -94,6 +89,7 @@ impl RtMaterial {
         let alpha = (self.roughness * self.roughness).clamp(0.05, 1.);
         (2. / (alpha * alpha) - 2.).max(1.) as _
     }
+
     /// Arguments:
     /// - obj_wnorm: Object's Worldspace Normal, normalized
     /// - ray_wdir: Ray's Worldspace Direction, normalized
@@ -119,6 +115,7 @@ impl RtMaterial {
         }
         (1. - self.transmission) * self.albedo * (ambient + diffuse / core::f32::consts::PI)
             + self.specular * specular
+            + self.emission
     }
 }
 
@@ -146,7 +143,7 @@ impl RtShadeContext {
             v: uv.1,
             I: wdir,
             time: t,
-            depth: depth as _,
+            depth: if depth == u16::MAX { -1 } else { depth as _ },
             params: params
                 .as_ref()
                 .map_or(core::ptr::null(), |p| p.as_ptr().cast()),

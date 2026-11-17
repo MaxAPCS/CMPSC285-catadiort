@@ -8,7 +8,7 @@ use ultraviolet::Vec3;
 use super::*;
 use crate::AOV;
 use crate::engine::Screen;
-use crate::options::{Options, options};
+use crate::options::{OPTIONS, Options};
 use crate::utils::{
     image::write_image,
     texture,
@@ -294,7 +294,7 @@ pub unsafe extern "C" fn rtSampler(name: *const c_char) {
     } else {
         eprintln!(
             "{}: rtSampler(\"{}\"): not a sampler, keeping {}",
-            options().scene,
+            OPTIONS.read().unwrap().scene,
             n,
             s.sampler
         );
@@ -344,7 +344,7 @@ pub(crate) fn bsdf_test(_o: &Options) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn rtWorldBegin(frame: RtInt) -> RtInt {
     world::clear();
-    let o = options();
+    let o = OPTIONS.read().unwrap();
     (o.frame_first < 0 || (frame >= o.frame_first && frame <= o.frame_last)) as RtInt
 }
 
@@ -376,7 +376,7 @@ fn is_aov(name: &str) -> bool {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rtWorldEnd() {
-    let o = options();
+    let o = OPTIONS.read().unwrap();
     if !o.aov.is_empty() && !is_aov(&o.aov) {
         eprintln!(
             "{}: --aov {}: not an image this renderer writes; it has raydir, normal, ng, depth, uv, albedo, cost and shadow",

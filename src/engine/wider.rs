@@ -1,5 +1,5 @@
 use ultraviolet::{DVec3x4, DVec4x4, Mat4, Vec3, Vec3x4, Vec4x4};
-use wide::{CmpGt, f32x4, f64x4, i32x4, u32x4};
+use wide::{CmpGe, f32x4, f64x4, i32x4, u32x4};
 
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
@@ -79,12 +79,12 @@ pub fn transform_vecx4d(mat: &Mat4, v: &Vec3x4) -> DVec3x4 {
 
 #[inline]
 pub fn copysign(vec: Vec3, sign: Vec3) -> Vec3 {
-    if vec.dot(sign) > 0. { vec } else { -vec }
+    if vec.dot(sign) >= 0. { vec } else { -vec }
 }
 
 #[inline]
 pub fn copysignx4(vec: Vec3x4, sign: Vec3x4) -> Vec3x4 {
-    Vec3x4::blend(vec.dot(sign).cmp_gt(f32x4::ZERO), vec, -vec)
+    Vec3x4::blend(vec.dot(sign).cmp_ge(f32x4::ZERO), vec, -vec)
 }
 
 #[inline]

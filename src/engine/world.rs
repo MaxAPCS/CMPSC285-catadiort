@@ -1,3 +1,5 @@
+#[cfg(feature = "bvh")]
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::sync::Arc;
 use ultraviolet::{Mat4, Rotor3, Rotor3x4, Vec3, Vec3x4, Vec4, Vec4x4};
 use wide::f32x4;
@@ -81,7 +83,7 @@ impl World {
         material: Arc<Material>,
     ) {
         let prop = material.prop;
-        let obj = Sphere::create(owtrans.inversed(), cutout, cutoutparams, material);
+        let obj = Sphere::create(owtrans, cutout, cutoutparams, material);
         if let Some(pl) = PointLight::from_emissive(&obj, &prop) {
             self.pointlights.push(pl);
         }
@@ -143,9 +145,8 @@ impl World {
         #[cfg(not(feature = "bvh"))]
         let tris: Vec<Arc<[_]>> = self.meshtris.drain(..).map(|(_, m)| Arc::from(m)).collect();
         #[cfg(feature = "bvh")]
-        let bvhs: Vec<_> = self
-            .meshtris
-            .drain(..)
+        let bvhs: Vec<_> = core::mem::take(&mut self.meshtris)
+            .into_par_iter()
             .map(|(_, m)| Arc::new(BVH::create(m)))
             .collect();
         let meshes = self
@@ -218,8 +219,8 @@ impl World {
                 .as_ref()
                 .expect("World::obstruct called before World::finish")
                 .obstruct(ray, depth);
-            ray.collapse();
         }
+        ray.collapse();
     }
 
     pub(super) fn shadowrays(&self, point: Vec3) -> impl Iterator<Item = ray::ShadowRay> {

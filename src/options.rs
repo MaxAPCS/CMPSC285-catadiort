@@ -5,8 +5,6 @@
 //! the twin of the C++ kit's options.h. Nothing to change here but
 //! RT_HOMEWORK, once per homework.
 
-#![allow(dead_code)] // given complete: your renderer uses the rest as it grows
-
 use std::{
     num::NonZeroU16,
     sync::{LazyLock, RwLock},
@@ -29,9 +27,8 @@ pub fn homework_integrator() -> &'static str {
 }
 
 /// The options, each overriding what the scene file set; "" or a negative
-/// number means "the scene's". cmdline.rs fills them before any scene runs;
-/// read them through options() (a copy) or OPTIONS.read().
-#[derive(Clone, Debug)]
+/// number means "the scene's". cmdline.rs fills them before any scene runs
+#[derive(Debug)]
 pub struct Options {
     pub integrator: String, /* --integrator whitted|cook|kajiya; this homework's unless given */
     pub width: Option<NonZeroU16>, /* --width W --height H; 0: the scene's rtFormat */
@@ -125,8 +122,3 @@ impl Default for Options {
 /// The options, filled by cmdline.rs before any scene runs (the simple main
 /// of main.rs sets a few by hand instead).
 pub static OPTIONS: LazyLock<RwLock<Options>> = LazyLock::new(|| RwLock::new(Options::new()));
-
-/// A copy of the options, for a renderer that reads them once at rtWorldEnd.
-pub fn options() -> Options {
-    OPTIONS.read().expect("options").clone()
-}

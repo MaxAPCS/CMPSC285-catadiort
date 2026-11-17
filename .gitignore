@@ -3,6 +3,7 @@ Cargo.lock
 
 renders/
 reference_renders/
+timing/
 
 assets/models/attic
 assets/models/sponza

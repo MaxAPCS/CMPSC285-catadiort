@@ -6,7 +6,6 @@ use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGt, f32x4};
 
 use super::{Material, ray, wider, world};
-use crate::api::RtMaterial;
 #[cfg(debug_assertions)]
 use crate::rt_trace;
 #[cfg(debug_assertions)]
@@ -134,18 +133,18 @@ impl Screen {
     ) {
         debug_assert!(!src.is_empty() && dst.is_empty());
 
-        // Process Source Intersections
+        // Process Intersections
         src.par_iter_mut().for_each(|(_, _, rays)| {
             world.intersect(rays, depth);
             rays.collapse();
         });
 
-        // Process Source Misses
-        let srchits_est = src.len() * 3 / 4;
+        // Process Misses
+        let srchits_est = src.len() * 3;
         let mut srchits = Vec::with_capacity(srchits_est);
         src.into_iter().for_each(|(idxs, wghs, rays)| {
             let wghs: [Vec3; 4] = (*wghs).into();
-            let Some(mut hit) = rays.get() else {
+            let Some(hits) = rays.get() else {
                 let env: [Vec3; 4] = world.sample_environmentx4(rays.dir).into();
                 for i in 0..4 {
                     if wghs[i].component_max() <= 0. {
@@ -155,8 +154,7 @@ impl Screen {
                 }
                 return;
             };
-            let hits: [ray::Hit; 4] = (&mut hit).into();
-            drop(hit);
+            let hits: [ray::Hit; 4] = hits.into();
             for (i, hit) in hits.into_iter().enumerate() {
                 if wghs[i].component_max() <= 0. {
                     continue;
@@ -188,7 +186,7 @@ impl Screen {
         });
         srchits.par_sort_unstable_by_key(|l| l.2.material.as_ref().map_or_default(|m| m.id));
 
-        // Group Source Hits
+        // Group Hits
         let srchitx4s_est = srchits.len() * 3 / 10;
         let mut srchitx4s: Vec<([u32; 4], Vec3x4, ray::Hitx4)> = Vec::with_capacity(srchitx4s_est);
         {
@@ -211,14 +209,8 @@ impl Screen {
             }
         }
 
-        // Shade Source Hits
+        // Shade Hits
         srchitx4s.par_iter_mut().for_each(|(_, wghs, hits)| {
-            let emits = hits.material[0]
-                .as_ref()
-                .map_or(const { RtMaterial::default_material().emits() }, |m| {
-                    m.emits()
-                });
-
             hits.norm = wider::copysignx4(hits.norm, -hits.wdir);
             let (norm, matrs) = hits.shade(depth);
             hits.norm = wider::copysignx4(norm.normalized(), -hits.wdir); // write back shader norms
@@ -235,27 +227,20 @@ impl Screen {
                     continue;
                 }
                 let shadowrays = world.shadowrays(wpos[i]).filter_map(|mut sr| {
-                    if sr.dir.dot(norm[i]) <= 0.0 {
+                    if sr.dir.dot(norm[i]) <= 0.0 || sr.obstructed() {
                         return None;
                     }
                     sr.pos += wider::copysign(wnorm[i] * RECAST_EPSILON, sr.dir);
-                    world.obstruct(&mut sr, depth);
-                    if sr.irradiance.component_max() > 0. {
-                        Some(sr)
-                    } else {
-                        None
-                    }
+                    world.obstruct(&mut sr, u16::MAX);
+                    if sr.obstructed() { None } else { Some(sr) }
                 });
                 contribs[i] = matrs[i].color(shadowrays, norm[i], wdir[i], world.ambientcolor);
-                if wnorm[i].dot(wdir[i]) < 0. || !emits {
-                    contribs[i] += matrs[i].emission;
-                }
             }
             let contribs: Vec3x4 = contribs.into();
             hits.color = contribs * *wghs; // write contribs into hit colors
         });
 
-        // Write Source Colors
+        // Write Colors
         srchitx4s.iter().for_each(
             |&(
                 idxs,
@@ -275,9 +260,11 @@ impl Screen {
             return;
         }
 
+        // Write Secondary Rays
         *dst = srchitx4s
             .into_par_iter()
             .flat_map_iter(|(idxs, wghs, hits)| {
+                // FIXME use post-shading material
                 let material = hits.material[0]
                     .as_deref()
                     .unwrap_or(const { &Material::default() });
@@ -373,12 +360,14 @@ impl Screen {
             #[cfg(feature = "aovalbedo")]
             {
                 if let Some(hits) = rays.get() {
-                    let material = hits.material.as_array_ref();
                     let color: [Vec3; 4] = hits.color.into();
                     let t = hits.t.as_array_ref();
                     for i in 0..4 {
                         if color[i].x.is_nan() && !t[i].is_nan() {
-                            out[i] = (world.materials[material[i] as usize]).albedo.into();
+                            out[i] = hits.material[i].as_deref().map_or(
+                                const { crate::api::RtMaterial::default_material().albedo },
+                                |m| m.prop.albedo,
+                            );
                         } else {
                             out[i] = color[i];
                         }

@@ -63,7 +63,7 @@ static void Pearls(const ObjMesh *mesh)
         }
     rtSurface(NULL, NULL, 0);
     rtCutout(NULL, NULL, 0);
-    FILE *f = std::fopen("models/crown/pearls.txt", "r");
+    FILE *f = std::fopen("assets/models/crown/pearls.txt", "r");
     if (!f) {
         std::fprintf(stderr, "Crown: models/crown/pearls.txt is missing\n");
         return;

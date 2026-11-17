@@ -532,7 +532,7 @@ pub fn parse_command_line(args: &[String], tables: &[SceneTable]) -> String {
     /* A test instead of a render: --warptest WARP N [PARAM] (HW3) or
      * --bsdftest [ARG ...] (HW4), one at a time and with no scene. The
      * renderer defines both (rt.rs); its exit code is ours. */
-    let o = crate::options::options();
+    let o = crate::options::OPTIONS.read().unwrap();
     if !o.warp.is_empty() || o.bsdf_test {
         let test = if o.bsdf_test {
             "--bsdftest"

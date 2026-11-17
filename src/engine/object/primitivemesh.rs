@@ -10,8 +10,10 @@ use crate::engine::bvh::BVH;
 use crate::engine::{Material, ray, wider};
 
 pub struct Mesh {
+    /// World to Object Transform
     wotrans: Mat4,
-    owtrans: Mat4,
+    /// Dual of Object to World Transform
+    owtrans_dual: Mat4,
 
     /// Cutout Shader Reference
     cutout: RtCutoutFn,
@@ -95,8 +97,9 @@ impl Primitive for Mesh {
 
         let mut wmin = Vec3::broadcast(f32::INFINITY);
         let mut wmax = Vec3::broadcast(f32::NEG_INFINITY);
+        let owtrans = self.wotrans.inversed();
         for ocorn in make_corners!(min.x, max.x, min.y, max.y, min.z, max.z) {
-            let wcorn = self.owtrans.transform_point3(ocorn);
+            let wcorn = owtrans.transform_point3(ocorn);
             wmin = wmin.min_by_component(wcorn);
             wmax = wmax.max_by_component(wcorn);
         }
@@ -109,7 +112,7 @@ impl Primitive for Mesh {
         let centroid = Self::tricentroid(&self.tris);
         #[cfg(feature = "bvh")]
         let centroid = self.tris.centroid();
-        self.owtrans.transform_point3(centroid)
+        self.wotrans.inversed().transform_point3(centroid)
     }
 
     fn obstruct(&self, ray: &mut ray::ShadowRay, depth: u16) {
@@ -122,23 +125,19 @@ impl Primitive for Mesh {
         #[cfg(not(feature = "bvh"))]
         {
             for triangle in self.tris.as_ref() {
-                if let Some(hit) = triangle.obstruct(&oray, depth) {
-                    return Some(hit);
-                }
+                triangle.obstruct(&mut oray, depth);
             }
-            None
         }
         #[cfg(feature = "bvh")]
         {
             self.tris.obstruct(&mut oray, depth);
         }
-        let owtrans_dual = self.wotrans.transposed();
         for mut hit in oray.hits {
             hit.opos = hit.wpos;
             hit.wpos = ray.pos + ray.dir * hit.t;
             hit.wdir = ray.dir;
-            hit.wnorm = owtrans_dual.transform_vec3(hit.wnorm).normalized();
-            hit.norm = owtrans_dual.transform_vec3(hit.norm).normalized();
+            hit.wnorm = self.owtrans_dual.transform_vec3(hit.wnorm).normalized();
+            hit.norm = self.owtrans_dual.transform_vec3(hit.norm).normalized();
             hit.material = Some(self.material.clone());
             if !self.cutout(&hit, depth) {
                 continue;
@@ -148,10 +147,7 @@ impl Primitive for Mesh {
     }
 
     fn intersect(&self, ray: &mut ray::Rayx4, depth: u16) {
-        let mut oray = ray::Rayx4::new(
-            wider::transform_pointx4(&self.wotrans, &ray.pos),
-            wider::transform_vecx4(&self.wotrans, ray.dir),
-        );
+        let mut oray = ray.transformed(&self.wotrans);
         #[cfg(not(feature = "bvh"))]
         {
             for triangle in self.tris.as_ref() {
@@ -162,16 +158,18 @@ impl Primitive for Mesh {
         {
             self.tris.intersect(&mut oray, depth);
         }
-        let owtrans_dual = self.wotrans.transposed();
         for mut hit in oray.hits {
             hit.opos = hit.wpos;
             hit.wpos = ray.pos + ray.dir * hit.t;
             hit.wdir = ray.dir;
-            hit.wnorm = wider::transform_vecx4(&owtrans_dual, hit.wnorm).normalized();
-            hit.norm = wider::transform_vecx4(&owtrans_dual, hit.norm).normalized();
+            hit.wnorm = wider::transform_vecx4(&self.owtrans_dual, hit.wnorm).normalized();
+            hit.norm = wider::transform_vecx4(&self.owtrans_dual, hit.norm).normalized();
             hit.material = core::array::from_fn(|_| Some(self.material.clone()));
             hit.t = f32x4::blend(self.cutoutx4(&hit, depth), hit.t, wider::f32x4_NAN);
-            ray.hits.push(hit);
+            if hit.t.is_nan().all() {
+                continue;
+            }
+            ray.push(hit);
         }
     }
 }
@@ -213,7 +211,7 @@ impl Mesh {
         let (u, v) = (hit.uv.0.as_array_ref(), hit.uv.1.as_array_ref());
 
         let mut out = [u32::MAX; 4];
-        out.iter_mut().enumerate().for_each(|(i, out)| {
+        for i in 0..4 {
             let mut ctx = RtShadeContext::new(
                 &self.cutoutparams,
                 wpos[i],
@@ -227,9 +225,9 @@ impl Mesh {
                 self.material.prop,
             );
             if unsafe { cutout(&mut ctx) } == 0 {
-                *out = 0
+                out[i] = 0
             }
-        });
+        }
         let out: u32x4 = out.into();
         bytemuck::cast(out)
     }
@@ -254,10 +252,13 @@ impl Mesh {
                 let o0 = positions[idxs[0] as usize];
                 let o1 = positions[idxs[1] as usize];
                 let o2 = positions[idxs[2] as usize];
+                let e1 = o1 - o0;
+                let e2 = o2 - o0;
                 Tri {
                     o: o0,
-                    e1: o1 - o0,
-                    e2: o2 - o0,
+                    e1,
+                    e2,
+                    onorm: Vec3::cross(&e1, e2).normalized(),
                     idxs: idxs.map(|idx| idx as _),
                     details: details.clone(),
                 }
@@ -285,9 +286,10 @@ impl Mesh {
         #[cfg(not(feature = "bvh"))] tris: Arc<[Tri]>,
         #[cfg(feature = "bvh")] tris: Arc<BVH<Tri>>,
     ) -> Self {
+        let wotrans = meshref.owtrans.inversed();
         Self {
-            wotrans: meshref.owtrans.inversed(),
-            owtrans: meshref.owtrans,
+            wotrans,
+            owtrans_dual: wotrans.transposed(),
 
             cutout: meshref.cutout,
             cutoutparams: meshref.cutoutparams,
@@ -302,6 +304,7 @@ pub(crate) struct Tri {
     o: Vec3,
     e1: Vec3,
     e2: Vec3,
+    pub onorm: Vec3,
 
     idxs: [usize; 3],
     details: Arc<TriData>,
@@ -346,7 +349,8 @@ impl Primitive for Tri {
     fn obstruct(&self, ray: &mut ray::ShadowRay, _: u16) {
         let ray_cross_e2 = ray.dir.cross(self.e2);
         let det = self.e1.dot(ray_cross_e2);
-        if !(det <= -f32::EPSILON || det >= f32::EPSILON) {
+        // no epsilon- shadows can be a little bigger, who cares
+        if det == 0. {
             return; // This ray is parallel to this triangle.
         }
         let inv_det = det.recip();
@@ -368,14 +372,13 @@ impl Primitive for Tri {
             return;
         }
 
-        let onorm = self.onorm();
         ray.hits.push(ray::Hit {
             opos: Vec3::broadcast(f32::NAN),
             wpos: ray.pos + ray.dir * t,
             wdir: ray.dir,
-            wnorm: onorm,
+            wnorm: self.onorm,
             t,
-            norm: self.norm((u, v)).unwrap_or(onorm),
+            norm: self.norm((u, v)).unwrap_or(self.onorm),
             uv: self.uv((u, v)),
             color: self.color((u, v)).unwrap_or(Vec3::broadcast(f32::NAN)),
             material: None,
@@ -417,21 +420,18 @@ impl Primitive for Tri {
             return;
         }
 
-        let u = wider::cast_f32(u);
-        let v = wider::cast_f32(v);
-        let t = wider::cast_f32(t);
-        let m = wider::cast_m32(m);
-        let onorm = Vec3x4::splat(self.onorm());
+        let uv = (wider::cast_f32(u), wider::cast_f32(v));
+        let onorm = Vec3x4::splat(self.onorm);
         ray.hits.push(ray::Hitx4 {
             opos: Vec3x4::broadcast(wider::f32x4_NAN),
-            wpos: ray.pos + ray.dir * t,
+            wpos: wider::cast_s(rwpos + rwdir * t),
             wdir: ray.dir,
             wnorm: onorm,
-            t: f32x4::blend(m, t, wider::f32x4_NAN),
-            norm: self.normx4((u, v)).unwrap_or(onorm),
-            uv: self.uvx4((u, v)),
+            t: f32x4::blend(wider::cast_m32(m), wider::cast_f32(t), wider::f32x4_NAN),
+            norm: self.normx4(uv).unwrap_or(onorm),
+            uv: self.uvx4(uv),
             color: self
-                .colorx4((u, v))
+                .colorx4(uv)
                 .unwrap_or(Vec3x4::broadcast(wider::f32x4_NAN)),
             material: [const { None }; 4],
         })
@@ -447,11 +447,6 @@ impl Tri {
     #[inline]
     pub fn operp(&self) -> Vec3 {
         Vec3::cross(&self.e1, self.e2)
-    }
-
-    #[inline]
-    fn onorm(&self) -> Vec3 {
-        self.operp().normalized()
     }
 
     #[inline]
@@ -506,8 +501,7 @@ impl Tri {
 
     #[inline]
     fn color(&self, bc: (f32, f32)) -> Option<Vec3> {
-        self.colors()
-            .map(|normals| trilerp(bc, normals).normalized())
+        self.colors().map(|colors| trilerp(bc, colors))
     }
 
     #[inline]
