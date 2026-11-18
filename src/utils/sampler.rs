@@ -74,7 +74,7 @@ struct Stratified {
     rng: Pcg32,
     seed: u64,
 
-    strata: (u8, u8),
+    strata: (u16, u16),
     index: u16,
     hash: u64,
     dimension: i32,
@@ -85,7 +85,7 @@ impl Sampler for Stratified {
         Self: Sized,
     {
         let mut factor = 1;
-        for x in (2..spp.isqrt()).rev() {
+        for x in (2..=spp.isqrt()).rev() {
             if spp % x == 0 {
                 factor = x;
                 break;
@@ -97,7 +97,7 @@ impl Sampler for Stratified {
             rng: Pcg32::new(),
             seed,
 
-            strata: (factor as u8, (spp / factor) as u8),
+            strata: (factor, (spp / factor)),
             index: 0,
             hash: 0,
             dimension: 0,
@@ -123,11 +123,11 @@ impl Sampler for Stratified {
     #[inline]
     fn next_2d(&mut self) -> Vec2 {
         let key = low32(hash_dimension(self.hash, self.dimension));
-        let p = permutation_element(self.index as _, self.spp(), key) as f32;
+        let p = permutation_element(self.index as _, self.spp(), key);
         self.dimension += 2;
         Vec2::new(
-            ((p % self.strata.0 as f32) + self.rng.uniform()) / self.strata.0 as f32,
-            ((p / self.strata.0 as f32) + self.rng.uniform()) / self.strata.1 as f32,
+            ((p % self.strata.0 as u32) as f32 + self.rng.uniform()) / self.strata.0 as f32,
+            ((p / self.strata.0 as u32) as f32 + self.rng.uniform()) / self.strata.1 as f32,
         )
         .min_by_component(Vec2::broadcast(ONE_MINUS_EPSILON))
     }
@@ -171,14 +171,12 @@ impl Sampler for Halton {
 
     fn next_1d(&mut self) -> f32 {
         let dim = self.dim();
-        self.dimension = dim as i32 + 1;
+        self.dimension += 1;
         dim
     }
 
     fn next_2d(&mut self) -> Vec2 {
-        let dim = self.dim();
-        self.dimension = dim as i32 + 2;
-        Vec2::new(dim, dim + 1.)
+        Vec2::new(self.next_1d(), self.next_1d())
     }
 }
 impl Halton {
