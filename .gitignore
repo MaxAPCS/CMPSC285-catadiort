@@ -4,6 +4,7 @@ Cargo.lock
 renders/
 reference_renders/
 timing/
+warptest/
 
 assets/models/attic
 assets/models/sponza

@@ -4,13 +4,14 @@ use crate::api::{RtMaterial, RtShadeContext, RtShaderFn};
 
 #[cfg(feature = "bvh")]
 mod bvh;
+pub(crate) mod integrators;
 mod object;
 mod ray;
 mod screen;
 mod wider;
 mod world;
 
-pub use object::*;
+pub(crate) use object::*;
 pub(crate) use screen::*;
 pub(crate) use world::*;
 

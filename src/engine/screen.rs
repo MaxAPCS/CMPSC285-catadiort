@@ -5,20 +5,12 @@ use rayon::slice::ParallelSlice;
 use ultraviolet::{Vec3, Vec3x4};
 use wide::f32x4;
 
-use super::{ray, wider, world};
-#[cfg(debug_assertions)]
-use crate::rt_trace;
-#[cfg(debug_assertions)]
-use crate::utils::debug::vec3_display;
-
-const RECAST_EPSILON: f32 = 1e-4;
+use super::{integrators::Integrator, ray, wider, world};
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
+
 pub(crate) struct Screen {
     frame: Box<[Vec3]>,
-
-    #[cfg(debug_assertions)]
-    width: u32,
 
     raysone: RayBuf,
     raystwo: RayBuf,
@@ -39,8 +31,6 @@ impl Screen {
         let torgh = Vec3x4::splat(halfheight * (w / h) * Vec3::cross(&fwd, up));
         Self {
             frame: vec![Vec3::zero(); (screen.0 * screen.1) as usize].into_boxed_slice(),
-            #[cfg(debug_assertions)]
-            width: screen.0,
             raysone: wider::Chunku32x4::from(
                 (0..screen.1).flat_map(|j| (0..screen.0).map(move |i| (i, j))),
             )
@@ -48,23 +38,6 @@ impl Screen {
                 let x: f32x4 = (wider::cast_f32x4(i) + 0.5) / w;
                 let y: f32x4 = (wider::cast_f32x4(j) + 0.5) / h;
                 let dir = (tofwd + (2. * x - 1.) * torgh + (1. - 2. * y) * totop).normalized();
-                #[cfg(debug_assertions)]
-                {
-                    let i = i.as_array_ref();
-                    let j = j.as_array_ref();
-                    let dir: [Vec3; 4] = dir.into();
-                    for n in 0..4 {
-                        rt_trace!(
-                            i[n],
-                            j[n],
-                            "pixel ({}, {}): camera ray o=({}) d=({})",
-                            i[n],
-                            j[n],
-                            vec3_display(eyepos),
-                            vec3_display(dir[n])
-                        );
-                    }
-                }
                 (
                     (j * screen.0 + i).into(),
                     Vec3x4::one(),
@@ -76,7 +49,7 @@ impl Screen {
         }
     }
 
-    pub fn process(&mut self, world: &world::World, max_depth: u16) {
+    pub fn process<I: Integrator>(&mut self, world: &world::World, max_depth: u16) {
         #[cfg(any(
             feature = "aovraydir",
             feature = "aovdepth",
@@ -88,26 +61,22 @@ impl Screen {
             return;
         }
         for depth in (0..=max_depth).step_by(2) {
-            Self::_pass(
+            Self::_pass::<I>(
                 &mut self.frame,
                 &mut self.raysone,
                 &mut self.raystwo,
                 world,
                 depth,
-                #[cfg(debug_assertions)]
-                self.width,
             );
             if self.raystwo.is_empty() || depth == max_depth {
                 break;
             }
-            Self::_pass(
+            Self::_pass::<I>(
                 &mut self.frame,
                 &mut self.raystwo,
                 &mut self.raysone,
                 world,
                 depth + 1,
-                #[cfg(debug_assertions)]
-                self.width,
             );
             if self.raysone.is_empty() {
                 break;
@@ -119,13 +88,12 @@ impl Screen {
         self.frame
     }
 
-    fn _pass(
+    fn _pass<I: Integrator>(
         frame: &mut Box<[Vec3]>,
         src: &mut RayBuf,
         dst: &mut RayBuf,
         world: &world::World,
         depth: u16,
-        #[cfg(debug_assertions)] width: u32,
     ) {
         debug_assert!(!src.is_empty() && dst.is_empty());
 
@@ -135,100 +103,11 @@ impl Screen {
             rays.collapse();
         });
 
+        // Run Integrator
         let mut contribs = Vec::with_capacity(src.len());
         let mut children = Vec::with_capacity(src.len() / 2);
         src.into_par_iter()
-            .map(|(idxs, wghs, rays)| {
-                let mut children = smallvec::SmallVec::<[_; 12]>::new();
-                let Some(hits) = rays.get() else {
-                    return (
-                        (*idxs, (*wghs * world.sample_environmentx4(rays.dir)).into()),
-                        children,
-                    );
-                };
-                let mut out = [Vec3::zero(); 4];
-                let wghs: [Vec3; 4] = (*wghs).into();
-                let hits: [ray::Hit; 4] = hits.into();
-                for (i, mut hit) in hits.into_iter().enumerate() {
-                    let idx = idxs[i];
-                    let wgh = wghs[i];
-
-                    if wgh.component_max() <= 0. {
-                        continue;
-                    }
-                    if hit.t.is_nan() {
-                        out[i] = wgh * world.sample_environment(hit.wdir);
-                        continue;
-                    }
-
-                    #[cfg(debug_assertions)]
-                    {
-                        rt_trace!(
-                            idx / width,
-                            idx % width,
-                            "depth {}: hit prim p t={} P=({}) N=({}) Ng=({}) {}",
-                            depth,
-                            hit.t,
-                            vec3_display(hit.wpos),
-                            vec3_display(hit.norm),
-                            vec3_display(hit.wnorm),
-                            if hit.wnorm.dot(hit.wdir) < 0. {
-                                "entering"
-                            } else {
-                                "leaving"
-                            }
-                        );
-                    }
-
-                    // Shade
-                    hit.norm = wider::copysign(hit.norm, -hit.wdir);
-                    let (norm, matr) = hit.shade(depth);
-                    hit.norm = wider::copysign(norm.normalized(), -hit.wdir); // write back shader norms
-
-                    // Color
-                    let shadowrays = world.shadowrays(hit.wpos).filter_map(|mut sr| {
-                        if sr.dir.dot(hit.norm) <= 0.0 || sr.obstructed() {
-                            return None;
-                        }
-                        sr.pos += wider::copysign(hit.wnorm * RECAST_EPSILON, sr.dir);
-                        world.obstruct(&mut sr, u16::MAX);
-                        if sr.obstructed() { None } else { Some(sr) }
-                    });
-                    out[i] = wgh * matr.color(shadowrays, hit.norm, hit.wdir, world.ambientcolor);
-
-                    // Reflect
-                    if matr.reflects() {
-                        let reflectdir = hit.reflect();
-                        children.push((
-                            idx,
-                            wgh * matr.specular * matr.smoothness(),
-                            hit.wpos + wider::copysign(hit.wnorm, reflectdir) * RECAST_EPSILON,
-                            reflectdir,
-                        ))
-                    }
-
-                    // Refract
-                    if matr.refracts() {
-                        let (reflectwgh, refractdir) = hit.refract(matr.ior);
-                        let reflectdir = hit.reflect();
-                        children.push((
-                            idx,
-                            wgh * matr.specular * reflectwgh,
-                            hit.wpos + wider::copysign(hit.wnorm, reflectdir) * RECAST_EPSILON,
-                            reflectdir,
-                        ));
-                        if !refractdir.x.is_nan() {
-                            children.push((
-                                idx,
-                                wgh * matr.transmission * (1. - reflectwgh),
-                                hit.wpos + wider::copysign(hit.wnorm, refractdir) * RECAST_EPSILON,
-                                refractdir,
-                            ));
-                        }
-                    }
-                }
-                ((*idxs, out), children)
-            })
+            .map(|(idxs, wghs, rays)| I::integrate(&world, idxs, *wghs, rays, depth))
             .unzip_into_vecs(&mut contribs, &mut children);
 
         // Write Colors
@@ -265,6 +144,7 @@ impl Screen {
             ));
         }
 
+        // Finish Pass
         #[cfg(debug_assertions)]
         println!("screen: pass count src {} dst {}", src.len(), dst.len());
         src.clear();

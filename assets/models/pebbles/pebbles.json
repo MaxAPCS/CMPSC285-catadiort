@@ -1,0 +1,208 @@
+{
+ "file": "D:\\Dropbox\\Research\\Projects\\GenerativePathTracing\\dataset\\Blender\\Random\\ScatteringPebbles\\ScatteringPebbles.blend",
+ "scene": "Scene",
+ "frame": 0,
+ "resolution": [
+  1920,
+  1080,
+  100
+ ],
+ "cameras": [
+  {
+   "name": "Camera",
+   "active": true,
+   "eye": [
+    -2.92916,
+    0.45291,
+    3.66561
+   ],
+   "lookat": [
+    -2.43706,
+    0.1813,
+    2.83853
+   ],
+   "up": [
+    0.1389,
+    0.96241,
+    -0.23341
+   ],
+   "fovy_deg": 22.895,
+   "lens_mm": 50.0,
+   "resolution": [
+    1920,
+    1080
+   ],
+   "type": "PERSP"
+  }
+ ],
+ "lights": [
+  {
+   "name": "Area",
+   "type": "SUN",
+   "color": [
+    1.0,
+    0.7004,
+    0.4944
+   ],
+   "blender_energy": 6.0,
+   "pos": [
+    1.54739,
+    1.14816,
+    -1.31241
+   ],
+   "dir": [
+    -0.685,
+    -0.44256,
+    0.57872
+   ],
+   "hide_render": false,
+   "E_guess": [
+    6.0,
+    4.2024,
+    2.9662
+   ],
+   "angle_deg": 10.0
+  },
+  {
+   "name": "Area.001",
+   "type": "SUN",
+   "color": [
+    0.2904,
+    0.396,
+    1.0
+   ],
+   "blender_energy": 1.0,
+   "pos": [
+    -1.75764,
+    1.41052,
+    -0.59685
+   ],
+   "dir": [
+    0.78449,
+    -0.5591,
+    0.26829
+   ],
+   "hide_render": false,
+   "E_guess": [
+    0.2904,
+    0.396,
+    1.0
+   ],
+   "angle_deg": 25.0
+  },
+  {
+   "name": "Area.002",
+   "type": "AREA",
+   "color": [
+    1.0,
+    0.3288,
+    0.1721
+   ],
+   "blender_energy": 11.780972480773926,
+   "pos": [
+    1.51217,
+    1.93444,
+    -0.13839
+   ],
+   "dir": [
+    -0.65303,
+    -0.75715,
+    0.01673
+   ],
+   "hide_render": false,
+   "shape": "DISK",
+   "size": [
+    2.0,
+    2.0
+   ],
+   "right": [
+    -0.58388,
+    0.48927,
+    -0.64785
+   ],
+   "up": [
+    -0.48233,
+    0.43283,
+    0.76159
+   ],
+   "I_guess": [
+    0.9375,
+    0.3082,
+    0.1613
+   ],
+   "Le_guess": [
+    0.9375,
+    0.3082,
+    0.1613
+   ]
+  }
+ ],
+ "world": {
+  "name": "World",
+  "nodes": [
+   {
+    "type": "OUTPUT_WORLD"
+   },
+   {
+    "type": "BACKGROUND",
+    "strength": 1.0,
+    "color": [
+     0.0085,
+     0.0127,
+     0.0183
+    ]
+   }
+  ],
+  "view_transform": "Filmic",
+  "exposure": 1.0
+ },
+ "static_obj": "pebbles.obj",
+ "static_triangles": 131072,
+ "prototypes": {
+  "GEO-pebble.obj": {
+   "triangles": 640,
+   "instances": 4865
+  },
+  "GEO-pebble.004.obj": {
+   "triangles": 336,
+   "instances": 11501
+  },
+  "GEO-pebble.002.obj": {
+   "triangles": 144,
+   "instances": 24392
+  }
+ },
+ "instanced_triangles": 10490384,
+ "sprinkles": 0,
+ "materials": {
+  "ground": {
+   "Kd": [
+    0.16871200501918793,
+    0.10930400341749191,
+    0.09934800118207932
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 2.882812208961706,
+   "Ni": 1.4500000476837158
+  },
+  "pebbles": {
+   "Kd": [
+    0.5642399787902832,
+    0.4005889892578125,
+    0.31909599900245667
+   ],
+   "Ks": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Ns": 2.882812208961706,
+   "Ni": 1.4500000476837158
+  }
+ },
+ "seconds": 6.4
+}

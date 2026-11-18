@@ -36,16 +36,19 @@ typedef RtFloat RtMatrix[4][4];
 typedef struct RtMaterial {
     RtColor albedo;       /* kd: diffuse reflectance per channel, 0 to 1 */
     RtColor specular;     /* ks: the reflectance head on: it weights the mirror
-                             ray and the highlight (HW2), the glossy lobe (HW3),
-                             and is Schlick's F0, metal or not (HW4) */
+                             ray and the highlight (HW2), and is Schlick's F0,
+                             metal or not, of the glossy lobe (HW3) and the
+                             BSDF (HW4), rising to 1 at grazing angles.
+                             On a dielectric it tints the IOR's reflection;
+                             use 1 for untinted glass (HW3 and HW4) */
     RtFloat roughness;    /* 0 = mirror, 1 = fully rough; the lobe's width
                              is alpha = roughness^2 in every homework.
                              HW2: the Phong exponent n = 2 / alpha^2 - 2
                              (alpha clamped to [0.05, 1]) and how much of
                              the mirror ray survives (Whitted handout); HW3: the
                              glossy lobe's width; HW4: GGX's alpha */
-    RtFloat metallic;     /* 0 = dielectric, 1 = metal. HW4 only; HW2 and HW3
-                             ignore it */
+    RtFloat metallic;     /* HW3 and HW4: removes this fraction of the pigment
+                             under the specular lobe; HW2 ignores it */
     RtFloat transmission; /* kt: 0 = opaque, 1 = clear glass */
     RtFloat ior;          /* eta: index of refraction of the inside (1.5 = glass) */
     RtColor emission;     /* radiance emitted (seen directly, this bright).
@@ -111,6 +114,11 @@ RtVoid rtTonemap(const char *op, RtFloat exposure); /* how the PNG is made from 
                                          2^exposure (stops), then "none" (a clamp to [0, 1], the default),
                                          "reinhard", "aces" or "filmic" (a curve with a shoulder),
                                          then sRGB. Provided complete (image.cpp); the .pfm stays linear */
+RtVoid rtColorGrade(RtColor tint, RtFloat vignette); /* the PNG's grade, applied with the exposure before the
+                                         tone map: each channel times tint (the default is 1, 1, 1), and the
+                                         image darkened toward its corners by vignette, 1 - vignette r^2 with
+                                         r the distance from the center, 1 at the corners (0, the default,
+                                         none). Provided complete (image.cpp); the .pfm stays linear */
 RtVoid rtPixelSamples(RtInt spp);     /* samples per pixel: cook and kajiya honor it, whitted renders one */
 RtVoid rtMaxDepth(RtInt depth);       /* whitted, cook: deepest secondary ray; kajiya: longest path. Default 8 */
 RtVoid rtAmbient(RtColor ka);         /* ka of the shading formula. whitted: ka * albedo; cook: the same, scaled

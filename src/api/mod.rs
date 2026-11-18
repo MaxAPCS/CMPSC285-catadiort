@@ -7,7 +7,6 @@ mod shaders;
 mod transform;
 mod world;
 
-pub(crate) use screen::{bsdf_test, warp_test};
 pub(crate) use shaders::*;
 
 type RtFloat = f32;

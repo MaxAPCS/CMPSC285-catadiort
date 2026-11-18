@@ -2,14 +2,15 @@
 //! options, each overriding what the scene file set, read into OPTIONS
 //! (options.rs); usage(), which lists them and the scenes; the scene tables
 //! main.rs renders from, one per folder of scenes/ the build found
-//! (build.rs; all and the tiers take the tables up to RT_HOMEWORK, a name
-//! runs anywhere); and image_path, where rtWorldEnd writes. Complete;
-//! nothing to change; the twin of the C++ kit's cmdline.cpp.
+//! (build.rs; all and the tiers take the scenes the integrator has
+//! reference images of, a name runs anywhere); and image_path, where
+//! rtWorldEnd writes. Complete; nothing to change; the twin of the C++
+//! kit's cmdline.cpp.
 
 use std::ffi::{CStr, c_char};
 use std::path::Path;
 
-use crate::options::{OPTIONS, Options, RT_HOMEWORK};
+use crate::options::{Integrator, OPTIONS, Options, RT_HOMEWORK};
 
 /* scenes ----------------------------------------------------------------- */
 
@@ -129,43 +130,7 @@ fn check_unique_names(tables: &[SceneTable]) {
     }
 }
 
-/// Whether the scene argument selects this entry of a table of homework hw:
-/// by name always; by "all", "stills" or its tier only when the table is
-/// this homework's or an earlier one's (RT_HOMEWORK).
-pub fn selected(scene: &str, s: &Scene, hw: i32) -> bool {
-    if scene == s.name {
-        return true;
-    }
-    if hw > RT_HOMEWORK {
-        return false;
-    }
-    if scene == "stills" {
-        return !is_movie(s.name);
-    }
-    scene == "all" || scene == s.tier
-}
-
 /* integrators and warps -------------------------------------------------- */
-
-/// The integrators, the homework each arrives in, and the folder of
-/// renders/ and reference_renders/ its images go to (numbered so the
-/// folders sort in homework order). Each named for the paper it
-/// implements: Whitted 1980; Cook, Porter and Carpenter 1984 (distribution
-/// ray tracing); Kajiya 1986 (path tracing).
-const INTEGRATORS: [(&str, i32, &str); 3] = [
-    ("whitted", 2, "1_Whitted"),
-    ("cook", 3, "2_Cook"),
-    ("kajiya", 4, "3_Kajiya"),
-];
-
-/// The homework an integrator arrives in, or 0 if there is no such name.
-fn integrator_homework(name: &str) -> i32 {
-    INTEGRATORS
-        .iter()
-        .find(|(n, _, _)| *n == name)
-        .map(|(_, hw, _)| *hw)
-        .unwrap_or(0)
-}
 
 /// The warps of --warptest, and whether each takes a PARAM. The first six
 /// are HW3's; ggx, the GGX distribution of visible normals, is HW4's.
@@ -179,6 +144,112 @@ const WARPS: [(&str, bool); 7] = [
     ("ggx", true),
 ];
 
+/* what all and the tiers render ------------------------------------------ */
+
+/// all, stills and a tier render, under an integrator, the scenes it has
+/// reference images of: every scene of its own homework's folder (less
+/// whitted's twins below) and, of an earlier homework's scenes, only those
+/// the integrator changes, listed here; the rest would look as they did
+/// under the earlier integrator. A scene's name renders it under any.
+const COOK_RENDERS_AGAIN: &[&str] = &[
+    "CornellBox",
+    "CornellBoxSpheres",
+    "Skylight",
+    "Paperclip",
+    "Aliasing",
+    "GlossySweep",
+    "Aliasing_64",
+    "DepthOfField_near",
+    "DepthOfField_mid",
+    "DepthOfField_far",
+    "BarcelonaPavilion",
+    "Crown",
+    "Chess",
+    "FishyCat",
+];
+const KAJIYA_RENDERS_AGAIN: &[&str] = &[
+    /* HW2's */
+    "Spheres",
+    "Ellipsoids",
+    "WhittedSpheres",
+    "CornellBox",
+    "CornellBoxSpheres",
+    "Earth",
+    "Cutout",
+    "Nested",
+    "Bunny",
+    "BallOnSlab",
+    "Molecule",
+    "MoleculeMovie",
+    "FunWithRefraction",
+    "FunWithRefractionMovie",
+    "VertexColors",
+    "Lucy",
+    "Skylight",
+    "Aliasing",
+    "GlossySweep",
+    "Aliasing_64",
+    "Dragon",
+    "Stadium",
+    "Forest",
+    "WhiteLands",
+    "BarcelonaPavilionSunOnly",
+    "SanMiguel",
+    "Crown",
+    "BarbershopSunOnly",
+    /* HW3's */
+    "SphereLight",
+    "SphereLightInside",
+    "QuadLight",
+    "GlossyFurnace",
+    "FrostedEarth",
+    "Convergence",
+    "FocusSweep",
+    "ManyLights",
+    "MagicalClock",
+    "MotionBlur",
+    "MotionBlurPan",
+    "MoleculeFastMovie",
+];
+/// HW3's twins of Aliasing and DepthOfField_mid, in HW2's folder: they
+/// differ only in what whitted ignores (the sample count, the lens).
+const WHITTED_LEAVES_OUT: &[&str] = &["Aliasing_64", "DepthOfField_near", "DepthOfField_far"];
+
+/// Whether the integrator has a reference image of the scene, from a table
+/// of homework hw.
+fn has_reference(name: &str, hw: i32, own: Integrator) -> bool {
+    if hw > own as i32 {
+        return false; /* a later homework's scene */
+    }
+    if hw == own as i32 {
+        return !matches!(own, Integrator::Whitted) || !WHITTED_LEAVES_OUT.contains(&name);
+    }
+    if matches!(own, Integrator::Cook) {
+        COOK_RENDERS_AGAIN
+    } else {
+        KAJIYA_RENDERS_AGAIN
+    }
+    .contains(&name)
+}
+
+/// Whether the scene argument selects this entry of a table of homework hw:
+/// by name always; by "all", "stills" or its tier only when the table is
+/// this homework's or an earlier one's (RT_HOMEWORK) and the integrator
+/// has a reference image of the scene (the lists above).
+pub fn selected(scene: &str, s: &Scene, hw: i32) -> bool {
+    if scene == s.name {
+        return true;
+    }
+    let o = OPTIONS.read().expect("options");
+    if hw > RT_HOMEWORK as i32 || !has_reference(s.name, hw, o.integrator) {
+        return false;
+    }
+    if scene == "stills" {
+        return !is_movie(s.name);
+    }
+    scene == "all" || scene == s.tier
+}
+
 /* usage ------------------------------------------------------------------ */
 
 /// The usage text and the list of scenes, on stderr.
@@ -188,7 +259,9 @@ pub fn usage(tables: &[SceneTable]) {
                           (the numbers are the scene's own arguments, rtSceneArg)
        gauchoRT all | stills | test | benchmark | study | compare | hero | extra [options]
        gauchoRT --help       this text
-                          (stills: all but the movies, the scenes named ...Movie)
+                          (stills: all but the movies, the scenes named ...Movie;
+                          all, stills and a tier: the scenes the integrator has
+                          reference images of)
        gauchoRT --warptest WARP N [PARAM]   (HW3) print N samples of a warp and exit;
                           WARP: disk, cosine_hemisphere, uniform_sphere, triangle,
                           uniform_cone COSTHETAMAX, phong EXPONENT, ggx ALPHA (HW4)
@@ -223,8 +296,8 @@ options, each overriding what the scene file set:
   --aov NAME              a debug image instead of the beauty: raydir (the camera ray's
                           direction, before any hit: the check of the viewing geometry),
                           normal, ng, depth, uv, albedo, cost (the camera ray's BVH work
-                          over 512), shadow (the fraction of the lights unblocked), ao
-                          (HW3); the renderer refuses a name it does not have. Written as
+                          over 512), shadow (the fraction of the lights unblocked); the
+                          renderer refuses a name it does not have. Written as
                           renders/<integrator>/<name>_<aov> unless --out says otherwise
   --sampler independent|stratified|halton|sobol
                           (HW3) the sample sequence
@@ -240,12 +313,13 @@ options, each overriding what the scene file set:
   --bvh sah|midpoint      which BVH builder (a renderer with one builder ignores it)
 "
     );
+    let integrator = OPTIONS.read().expect("options").integrator.clone();
     for table in tables {
         eprintln!(
             "{} scenes ({}/):{}",
             table.label,
             table.folder,
-            if table.hw > RT_HOMEWORK {
+            if table.hw > RT_HOMEWORK as i32 {
                 ", by name only until RT_HOMEWORK reaches this homework"
             } else {
                 ""
@@ -257,15 +331,15 @@ options, each overriding what the scene file set:
                 tier = s.tier;
                 eprintln!("  {}:", tier);
             }
-            eprintln!(
-                "    {}{}",
-                s.name,
-                if is_movie(s.name) {
-                    " (movie: numbered frames)"
-                } else {
-                    ""
-                }
-            );
+            let mut note = String::from(if is_movie(s.name) {
+                " (movie: numbered frames)"
+            } else {
+                ""
+            });
+            if table.hw <= RT_HOMEWORK as i32 && !has_reference(s.name, table.hw, integrator) {
+                note += &format!(" (by name only under {})", integrator.to_string());
+            }
+            eprintln!("    {}{}", s.name, note);
         }
     }
 }
@@ -324,19 +398,27 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
         let a = args[i].as_str();
         match a {
             "--integrator" => {
-                o.integrator = value_of(args, &mut i, a).to_string();
-                let hw = integrator_homework(&o.integrator);
-                if hw == 0 {
-                    fail(&format!(
-                        "--integrator: whitted, cook or kajiya, not '{}'",
-                        o.integrator
-                    ));
-                }
-                if hw > RT_HOMEWORK {
-                    fail(&format!(
-                        "--integrator {} is HW{}'s integrator, and this renderer is at HW{}.\nWhen HW{} starts, set RT_HOMEWORK to {} in src/options.rs.",
-                        o.integrator, hw, RT_HOMEWORK, hw, hw
-                    ));
+                let integstr = value_of(args, &mut i, a).to_string();
+                match integstr.as_str().try_into() {
+                    Ok(integ) => {
+                        if integ > RT_HOMEWORK {
+                            fail(&format!(
+                                "--integrator {} is HW{}'s integrator, and this renderer is at HW{}.\nWhen HW{} starts, set RT_HOMEWORK to {} in src/options.rs.",
+                                o.integrator.to_string(),
+                                integstr,
+                                RT_HOMEWORK.to_string(),
+                                integstr,
+                                integstr
+                            ));
+                        };
+                        o.integrator = integ
+                    }
+                    Err(_) => {
+                        fail(&format!(
+                            "--integrator: whitted, cook or kajiya, not '{}'",
+                            integstr
+                        ));
+                    }
                 }
             }
             "--width" => o.width = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
@@ -546,9 +628,9 @@ pub fn parse_command_line(args: &[String], tables: &[SceneTable]) -> String {
             fail(&format!("{} renders nothing: drop '{}'", test, s));
         }
         std::process::exit(if o.bsdf_test {
-            crate::api::bsdf_test(&o)
+            unimplemented!("bsdf_test bsdf test")
         } else {
-            crate::api::warp_test(&o)
+            crate::utils::warp::test::run_warp_test(&o)
         });
     }
 
@@ -576,11 +658,7 @@ pub fn image_path(display: &str) -> String {
     let o = OPTIONS.read().expect("options");
     let mut path = o.out.clone();
     if path.is_empty() {
-        let folder = INTEGRATORS
-            .iter()
-            .find(|(n, _, _)| *n == o.integrator)
-            .map(|(_, _, f)| *f)
-            .unwrap_or(o.integrator.as_str());
+        let folder = o.integrator.folder();
         path = format!("renders/{}/{}", folder, display);
         if !o.aov.is_empty() {
             path = format!("{}_{}", path, o.aov);

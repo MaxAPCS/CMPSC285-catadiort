@@ -1,4 +1,18 @@
 /*
+ * FishyCat_FIXED.cpp: HW2's FishyCat, corrected. Copy it over
+ * scenes/1_Whitted/3_HeroScenes/FishyCat.cpp, keeping that name, and never
+ * keep both (two definitions of the same scene). What changed: the kit's
+ * file hid the glowing bowl around the cat, its biggest light, with a cutout
+ * that answers no surface to every ray, which worked only because a light
+ * sample never asked the cutout. In HW3 it must (a lamp may have holes:
+ * PerforatedLamp), and the bowl would light nothing. Here the cutout hides
+ * it from the camera and from shadow rays only, depth > 0, as every hidden
+ * lamp of the kit does, so the light sampler and reflected rays see it. Its
+ * whitted image changes in the eyes, which now reflect the bowl: the kit's
+ * reference_renders/1_Whitted/ has the new one.
+ */
+
+/*
  * ECE/CS 285 – HW2 Hero Scene: FishyCat
  * A cat with huge eyes under a fish on a string, in the grass: a coat of
  * 182,000 hair strands as ribbons, 13,000 instanced grass blades, 3,000
@@ -67,16 +81,18 @@ static void SPARKLE(RtShadeContext *c)
 static void COAT(RtShadeContext *c)
 {
     const float a = (c->m.albedo[0] + c->m.albedo[1] + c->m.albedo[2]) / 3;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         c->m.emission[i] = 0.048f * TINT[i] * c->m.albedo[i] * a * a * a;
+    }
 }
 
 /* WHISKER: a faint glow on top of the whiskers' matte and gloss. */
 static void WHISKER(RtShadeContext *c)
 {
     static const float glow[3] = {0.101f, 0.089f, 0.072f};
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         c->m.emission[i] = TINT[i] * glow[i];
+    }
 }
 
 /* CORNEA: the glass domes over the eyes exist only for rays coming in
@@ -91,20 +107,25 @@ static RtInt CORNEA(RtShadeContext *c)
     return dot(Vec3(c->I), out) < 0 ? 1 : 0;
 }
 
-/* NOWHERE: a light no ray hits, seen only by the light sampling. */
-static RtInt NOWHERE(RtShadeContext *)
+/* LAMP: hidden from the camera (depth 0) and from shadow rays (depth
+ * -1); a reflected ray and a sample of the light see it. A cutout that
+ * hid it from every ray would take it away as a light too. */
+static RtInt LAMP(RtShadeContext *c)
 {
-    return 0;
+    return c->depth > 0;
 }
 
 static void FishyCatMaterials(const char *material, void *)
 {
-    if (std::strcmp(material, "cat_eye_cornea") == 0)
+    if (std::strcmp(material, "cat_eye_cornea") == 0) {
         rtCutout(CORNEA, NULL, 0);
-    if (std::strcmp(material, "cat_hair_short") == 0)
+    }
+    if (std::strcmp(material, "cat_hair_short") == 0) {
         rtSurface(COAT, NULL, 0);
-    if (std::strcmp(material, "cat_hair_long") == 0)
+    }
+    if (std::strcmp(material, "cat_hair_long") == 0) {
         rtSurface(WHISKER, NULL, 0);
+    }
     if (std::strcmp(material, "env_sparkle") == 0) {
         RtMaterial m = MATTE(0, 0, 0);
         rtMaterial(&m); /* the MTL's Ke would make each flake a light */
@@ -112,10 +133,10 @@ static void FishyCatMaterials(const char *material, void *)
     }
     if (std::strcmp(material, "env_reflector") == 0) {
         /* A bowl around the cat glowing a warm white: its biggest light,
-         * hidden from the camera, from reflections and from shadows. */
+         * hidden from the camera and from shadows. */
         RtMaterial m = EMITTER(0.666f * TINT[0], 0.629f * TINT[1], 0.578f * TINT[2]);
         rtMaterial(&m);
-        rtCutout(NOWHERE, NULL, 0);
+        rtCutout(LAMP, NULL, 0);
     }
 }
 

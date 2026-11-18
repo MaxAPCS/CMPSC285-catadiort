@@ -1,0 +1,13 @@
+# written by tools/blender2obj.py
+
+newmtl ground
+Kd 0.1687 0.1093 0.0993
+Ks 0.0000 0.0000 0.0000
+Ns 2.8828
+Ni 1.4500
+
+newmtl pebbles
+Kd 0.5642 0.4006 0.3191
+Ks 0.0000 0.0000 0.0000
+Ns 2.8828
+Ni 1.4500

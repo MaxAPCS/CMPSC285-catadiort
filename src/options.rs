@@ -15,14 +15,53 @@ use std::{
 /// integrators --integrator accepts (this homework's and the earlier
 /// ones'), and which scene tables `gauchoRT all` and the tiers include.
 /// A scene name renders any scene the build has.
-pub const RT_HOMEWORK: i32 = 2;
+pub const RT_HOMEWORK: Integrator = Integrator::Cook;
 
-/// The integrator of homework RT_HOMEWORK: 2 whitted, 3 cook, 4 kajiya.
-pub fn homework_integrator() -> &'static str {
-    match RT_HOMEWORK {
-        4.. => "kajiya",
-        3 => "cook",
-        _ => "whitted",
+/// The integrators, the homework each arrives in, and the folder of
+/// renders/ and reference_renders/ its images go to (numbered so the
+/// folders sort in homework order). Each named for the paper it
+/// implements: Whitted 1980; Cook, Porter and Carpenter 1984 (distribution
+/// ray tracing); Kajiya 1986 (path tracing).
+/// The homework an integrator arrives in, or 0 if there is no such name.
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
+pub enum Integrator {
+    Whitted = 2,
+    Cook = 3,
+    Kajiya = 4,
+}
+
+impl Integrator {
+    pub fn folder(&self) -> &str {
+        match self {
+            Integrator::Whitted => "1_Whitted",
+            Integrator::Cook => "2_Cook",
+            Integrator::Kajiya => "3_Kajiya",
+        }
+    }
+}
+
+impl TryFrom<&str> for Integrator {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "whitted" => Self::Whitted,
+            "cook" => Self::Cook,
+            "kajiya" => Self::Kajiya,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl ToString for Integrator {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Whitted => "whitted".to_string(),
+            Self::Cook => "cook".to_string(),
+            Self::Kajiya => "kajiya".to_string(),
+        }
     }
 }
 
@@ -30,7 +69,7 @@ pub fn homework_integrator() -> &'static str {
 /// number means "the scene's". cmdline.rs fills them before any scene runs
 #[derive(Debug)]
 pub struct Options {
-    pub integrator: String, /* --integrator whitted|cook|kajiya; this homework's unless given */
+    pub integrator: Integrator, /* --integrator whitted|cook|kajiya; this homework's unless given */
     pub width: Option<NonZeroU16>, /* --width W --height H; 0: the scene's rtFormat */
     pub height: Option<NonZeroU16>,
     pub spp: Option<NonZeroU16>, /* --spp N; 0: the scene's rtPixelSamples */
@@ -75,7 +114,7 @@ pub struct Options {
 impl Options {
     pub fn new() -> Options {
         Options {
-            integrator: homework_integrator().to_string(),
+            integrator: RT_HOMEWORK,
             width: None,
             height: None,
             spp: None,

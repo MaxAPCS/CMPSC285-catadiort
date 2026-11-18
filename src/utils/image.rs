@@ -96,6 +96,9 @@ fn tone_aces(x: f32) -> f32 {
 #[inline]
 fn tone_filmic(x: f32) -> f32 {
     /* Hable 2010 ("Uncharted 2"), white at 11.2 */
+    if x <= 0.0 {
+        return 0.0; /* exactly: in float the formula leaves about 1e-8 at 0, which the dither can raise to a code of 1 */
+    }
     const A: f32 = 0.15;
     const B: f32 = 0.50;
     const C: f32 = 0.10;
@@ -136,19 +139,26 @@ fn pixel_noise(pixel: usize) -> f32 {
     (h >> 8) as f32 * (1.0 / 16777216.0)
 }
 
-/// The 8-bit image, PNG or JPEG by format: exposure, tone map, sRGB and
-/// the dither below.
+/// The 8-bit image, PNG or JPEG by format: exposure, grade, tone map,
+/// sRGB and the dither below.
 fn write_8bit(
     path: &str,
-    w: u32,
-    h: u32,
+    w: usize,
+    h: usize,
     rgb: &Box<[Vec3]>,
     tonemap: &str,
     exposure: f32,
     format: &str,
+    tint: Vec3,
+    vignette: f32,
 ) -> bool {
     let tone = tone_map(tonemap);
     let scale = 2.0f32.powf(exposure);
+    let gain = scale * tint;
+    /* The vignette: 1 - vignette r^2, r the distance from the image's
+     * center with the corners at 1 (rtColorGrade). */
+    let (cx, cy) = (0.5 * (w - 1) as f32, 0.5 * (h - 1) as f32);
+    let corner2 = (cx * cx + cy * cy).max(1.0);
     /* Dithered: a value between two 8-bit levels goes to the upper one with
      * the probability of its position between them, decided by a hash of
      * the pixel, so a slow gradient in a dark region breaks into fine noise
@@ -158,8 +168,11 @@ fn write_8bit(
         .par_iter()
         .enumerate()
         .flat_map_iter(|(i, &v)| {
-            v.as_array()
-                .map(|v| to8(tone(if v > 0.0 { v * scale } else { 0.0 }), pixel_noise(i)))
+            let (dx, dy) = ((i % w) as f32 - cx, (i / w) as f32 - cy);
+            let falloff = (1.0 - vignette * (dx * dx + dy * dy) / corner2).max(0.0);
+            (v * gain * falloff)
+                .as_array()
+                .map(|v| to8(tone(if v > 0.0 { v } else { 0.0 }), pixel_noise(i)))
         })
         .collect();
     /* The fastest deflate and no row filtering: a slow PNG write would show
@@ -178,10 +191,10 @@ fn write_8bit(
     let out = std::io::BufWriter::new(file);
     let color = image::ExtendedColorType::Rgb8;
     let written = if format == "jpg" {
-        JpegEncoder::new_with_quality(out, 92).write_image(&bytes, w, h, color)
+        JpegEncoder::new_with_quality(out, 92).write_image(&bytes, w as _, h as _, color)
     } else {
         PngEncoder::new_with_quality(out, CompressionType::Fast, FilterType::NoFilter)
-            .write_image(&bytes, w, h, color)
+            .write_image(&bytes, w as _, h as _, color)
     };
     if written.is_err() {
         eprintln!("could not write {}", path);
@@ -234,13 +247,13 @@ fn write_pfm(
 
 /// Write w x h pixels of linear radiance (three floats per pixel, top row
 /// first) as <path>.png, or <path>.jpg with format "jpg" (--format):
-/// scaled by 2^exposure (stops), through the tone map ("none": clamped to
-/// [0, 1]; "reinhard", "aces" or "filmic": a curve with a shoulder, as
-/// rt.h's rtTonemap says), then sRGB encoded; and with pfm as <path>.pfm
-/// with the floats as they are, linear, before exposure and tone map. The
-/// folder must exist (cmdline.rs's image_path makes it). True if every file
-/// was written, else stderr says.
-#[allow(clippy::too_many_arguments)] // the C++ kit's writeImage, argument for argument
+/// scaled by 2^exposure (stops) and graded (rtColorGrade: each channel
+/// times tint, and darkened toward the corners by vignette), through the
+/// tone map ("none": clamped to [0, 1]; "reinhard", "aces" or "filmic": a
+/// curve with a shoulder, as rt.h's rtTonemap says), then sRGB encoded;
+/// and with pfm as <path>.pfm with the floats as they are, linear, before
+/// exposure, grade and tone map. The folder must exist (cmdline.rs's
+/// image_path makes it). True if every file was written, else stderr says.
 pub fn write_image(
     path: &str,
     w: i32,
@@ -250,6 +263,8 @@ pub fn write_image(
     tonemap: &str,
     exposure: f32,
     format: &str,
+    tint: Vec3,
+    vignette: f32,
 ) -> bool {
     let mut ok = write_8bit(
         &format!("{}.{}", path, format),
@@ -259,6 +274,8 @@ pub fn write_image(
         tonemap,
         exposure,
         format,
+        tint,
+        vignette,
     );
     if pfm {
         ok &= write_pfm(&format!("{}.pfm", path), w as _, h as _, rgb).is_ok();

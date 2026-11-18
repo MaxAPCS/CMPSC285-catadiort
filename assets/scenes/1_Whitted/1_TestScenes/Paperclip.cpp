@@ -1,4 +1,17 @@
 /*
+ * Paperclip_FIXED.cpp: HW2's Paperclip, corrected. Copy it over
+ * scenes/1_Whitted/1_TestScenes/Paperclip.cpp, keeping that name, and never
+ * keep both (two definitions of the same scene). What changed: the kit's
+ * file gave the table's specular as 1, a reflection strength, which under
+ * cook and kajiya is the coat's reflectance head on and leaves nothing for
+ * the wood under it, so the table rendered black. Here the table's specular
+ * is 0.7, the wood's colors are raised to make up for the share the coat
+ * keeps, and the clip is polished to roughness 0.25. Its whitted image
+ * changes too, the wood paler and the clip mirroring the table: the kit's
+ * reference_renders/1_Whitted/ has the new one.
+ */
+
+/*
  * ECE/CS 285 – HW2 Test Scene: Paperclip
  * After Cook, Porter and Carpenter's "Distributed Ray Tracing" (SIGGRAPH
  * 1984): a steel paper clip standing on a varnished oak table under one
@@ -6,8 +19,7 @@
  * stretches across the table and its shadow softens with the lamp's size:
  * glossy reflection and soft shadows in one picture. The clip is a tube
  * swept along its wire, built here; the oak is WOOD from sceneutil.h.
- * 960 x 720, 512 spp (enough: at 2048 the glossy caustic under the clip
- * differs by under half an 8-bit level), halton, seed 0.
+ * 960 x 720, 512 spp, halton, seed 0.
  *
  * Output: renders/<integrator>/1_TestScenes/Paperclip.png
  */
@@ -78,13 +90,14 @@ static void Tube(const std::vector<Vec3> &path, float r, int n)
     t1.store(&N[3 * (m * n + 1)]);
 
     std::vector<RtInt> idx;
-    for (size_t i = 0; i + 1 < m; i++)
+    for (size_t i = 0; i + 1 < m; i++) {
         for (int k = 0; k < n; k++) {
             const RtInt a = (RtInt)(i * n + k), b = (RtInt)(i * n + (k + 1) % n);
             const RtInt c = (RtInt)((i + 1) * n + k), d = (RtInt)((i + 1) * n + (k + 1) % n);
             idx.push_back(a); idx.push_back(d); idx.push_back(c);
             idx.push_back(a); idx.push_back(b); idx.push_back(d);
         }
+    }
     for (int k = 0; k < n; k++) { /* the end caps */
         idx.push_back((RtInt)(m * n)); idx.push_back((RtInt)k); idx.push_back((RtInt)((k + 1) % n));
         idx.push_back((RtInt)(m * n + 1)); idx.push_back((RtInt)((m - 1) * n + (k + 1) % n)); idx.push_back((RtInt)((m - 1) * n + k));
@@ -108,19 +121,21 @@ void Paperclip(void)
     RtVector up = {0, 1, 0};
     const float pi = 3.14159265f;
 
-    /* The clip: brushed steel, a wide glossy lobe (specular 0.5,
-     * roughness 0.5) over a dark base, metal rather than mirror; wide, so
-     * the lamp is narrower than its lobe and is sampled on it, not found
-     * by its ray. The table: a flat-sawn
-     * oak plank under a clear coat (specular 1, roughness 0.21: the
-     * clip's reflection is sharp at its foot and blurs as it stretches
-     * toward the camera, until the wood shows through); the pith 11 cm
-     * below the top, 15 degrees off its length. The wall: dark grey,
-     * matte, 90 cm back. */
-    RtMaterial steel = {{0.05f, 0.05f, 0.05f}, {0.5f, 0.5f, 0.48f}, 0.5f, 1, 0, 1.5f, {0, 0, 0}};
-    RtMaterial table = {{0.5f, 0.3f, 0.1f}, {1, 1, 1}, 0.21f, 0, 0, 1.5f, {0, 0, 0}};
-    WoodParams oak = {{0.44f, 0.25f, 0.095f}, {0.19f, 0.085f, 0.034f}, 18, 1.5f, -2.0f, 15, 1.0f, 0.15f, 0.15f, 0.0005f,
-                      {0.01f, 0.05f, 0.17f}, 2 * std::tan(fovy / 2 * pi / 180) / 720, {1, 1, 1}, 0.21f};
+    /* The clip: polished steel, a glossy lobe (specular 0.5, roughness
+     * 0.25) over a dark base, metal rather than mirror. The table: a
+     * flat-sawn oak plank under a strong clear coat (specular 0.7,
+     * roughness 0.21: the clip's reflection is sharp at its foot and
+     * blurs as it stretches toward the camera, until the wood shows
+     * through); the pith 11 cm below the top, 15 degrees off its length.
+     * The wood's colors are well above 1 on purpose: under cook and
+     * kajiya the coat passes only about 0.3 of the light to the wood
+     * under it, and the colors are set so that the table reads as a lit
+     * oak there; under whitted, which has no coat, the wood is paler.
+     * The wall: dark grey, matte, 90 cm back. */
+    RtMaterial steel = {{0.05f, 0.05f, 0.05f}, {0.5f, 0.5f, 0.48f}, 0.25f, 1, 0, 1.5f, {0, 0, 0}};
+    RtMaterial table = {{0.5f, 0.3f, 0.1f}, {0.7f, 0.7f, 0.7f}, 0.21f, 0, 0, 1.5f, {0, 0, 0}};
+    WoodParams oak = {{5.87f, 3.336f, 1.268f}, {2.534f, 1.134f, 0.454f}, 18, 1.5f, -2.0f, 15, 1.0f, 0.15f, 0.15f, 0.0005f,
+                      {0.01f, 0.05f, 0.17f}, 2 * std::tan(fovy / 2 * pi / 180) / 720, {0.7f, 0.7f, 0.7f}, 0.21f};
     RtMaterial wall = MATTE(0.04f, 0.038f, 0.034f);
     /* The lamp: a 5 cm disc 28 cm up, in front of the clip and to the
      * camera's left, turned toward it, so the shadow falls back and to

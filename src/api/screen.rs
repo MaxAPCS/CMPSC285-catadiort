@@ -7,8 +7,8 @@ use ultraviolet::Vec3;
 
 use super::*;
 use crate::AOV;
-use crate::engine::Screen;
-use crate::options::{OPTIONS, Options};
+use crate::engine::{Screen, integrators};
+use crate::options::{Integrator, OPTIONS, Options};
 use crate::utils::{
     image::write_image,
     texture,
@@ -37,6 +37,8 @@ pub struct ScreenState {
     pub up: RtVector,
     pub fovy: f32,
     pub tonemap: String, /* rtTonemap: the PNG's tone map and exposure (stops) */
+    pub tint: RtColor,
+    pub vignette: f32,
     pub exposure: f32,
 
     /* The [HW3] calls, stored now and read by cook (HW3): whitted renders
@@ -67,6 +69,8 @@ impl ScreenState {
             fovy: 45.0,
             display: String::new(),
             tonemap: String::new(),
+            tint: Vec3::broadcast(1.),
+            vignette: 0.,
             exposure: 0.0,
             lens_radius: 0.0,
             focus_distance: 1.0,
@@ -172,6 +176,13 @@ pub unsafe extern "C" fn rtTonemap(op: *const c_char, exposure: RtFloat) {
     let t = text(op);
     s.tonemap = if t.is_empty() { "none".to_string() } else { t };
     s.exposure = exposure;
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rtColorGrade(tint: &RtColor, vignette: RtFloat) {
+    let mut s = state();
+    s.tint = *tint;
+    s.vignette = vignette;
 }
 
 /// Samples per pixel. whitted renders one whatever it says; cook and
@@ -322,19 +333,6 @@ pub unsafe extern "C" fn rtEnvironmentPortal(corners: *const RtPoint) {
     }
 }
 
-pub(crate) fn warp_test(o: &Options) -> i32 {
-    eprintln!(
-        "--warptest {}: the warps are HW3's; this renderer has none yet",
-        o.warp
-    );
-    1
-}
-
-pub(crate) fn bsdf_test(_o: &Options) -> i32 {
-    eprintln!("--bsdftest: the BSDFs are HW4's; this renderer has none yet");
-    1
-}
-
 /* world ------------------------------------------------------------------ */
 
 /// rtWorldBegin starts a world: the lights and primitives drawn from here to
@@ -414,19 +412,19 @@ pub extern "C" fn rtWorldEnd() {
 
         let fwd = (s.lookat - s.eye).normalized();
         let up = fwd.cross(s.up).cross(fwd).normalized();
-        let mut screen = Screen::create(
-            s.eye,
-            fwd,
-            up,
-            s.fovy.to_radians(),
-            (s.res.0 as _, s.res.1 as _),
-        );
+        let fov = s.fovy.to_radians();
+        let res = (s.res.0 as _, s.res.1 as _);
+        let mut screen = Screen::create(s.eye, fwd, up, fov, res);
         let build_time = total.seconds();
 
         let render = Timer::new();
         let budget = RenderBudget::new(o.time_limit); /* --time-limit: the clock starts here (timer.rs) */
 
-        screen.process(&world, s.max_depth);
+        match o.integrator {
+            Integrator::Whitted => screen.process::<integrators::Whitted>(&world, s.max_depth),
+            Integrator::Cook => screen.process::<integrators::Cook>(&world, s.max_depth),
+            _ => unimplemented!(),
+        };
 
         (build_time, render, budget, screen.write())
     };
@@ -450,6 +448,8 @@ pub extern "C" fn rtWorldEnd() {
     } else {
         s.exposure
     };
+    let tint = if AOV { Vec3::one() } else { s.tint };
+    let vignette = if AOV { 0. } else { s.vignette };
     write_image(
         &crate::cmdline::image_path(&s.display),
         s.res.0 as _,
@@ -459,6 +459,8 @@ pub extern "C" fn rtWorldEnd() {
         &tonemap,
         exposure,
         &o.format,
+        tint,
+        vignette,
     );
 
     let scene_name = if !o.scene.is_empty() {

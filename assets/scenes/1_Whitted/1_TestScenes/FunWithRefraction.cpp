@@ -1,12 +1,28 @@
 /*
+ * FunWithRefraction_FIXED.cpp: HW2's FunWithRefraction, corrected. Copy it
+ * over scenes/1_Whitted/1_TestScenes/FunWithRefraction.cpp, keeping that
+ * name, and never keep both (two definitions of the same scene). What
+ * changed: the kit's file gave the glass ball and the slab a roughness of
+ * 0.14, which cook and kajiya render as frosted glass, with the lights'
+ * caustics speckled over everything, where whitted's Fresnel pair ignores
+ * it. Here the glass is clear, roughness 0. No reference image changes:
+ * whitted's never depended on the roughness. What you will see under kajiya
+ * is the scene's point, not a defect of this file: the pink rod goes dark
+ * inside the slab, where whitted draws it, because a path tracer cannot find
+ * a point light or a sun through clear glass.
+ */
+
+/*
  * ECE/CS 285 – HW2 Test Scene: FunWithRefraction
  * A red, a green and a blue sphere behind a glass ball, over a glass slab
  * with a pink rod through it; one point light and a sun: refraction with
  * a Fresnel rim, the rod bent in the slab, total internal reflection in
- * the slab's bottom face. Also a movie: the spheres circle once about the
- * line of sight behind the ball 4 times in 96 frames at 24 a second (the
- * speed is the scene's argument), each frame exposed over half its turn
- * (cook blurs them, whitted does not); the rest stays put.
+ * the slab's bottom face. Under kajiya the rod inside the slab goes dark:
+ * a path tracer cannot find a point light or a sun through clear glass.
+ * Also a movie: the spheres circle once about the line of sight behind
+ * the ball 4 times in 96 frames at 24 a second (the speed is the scene's
+ * argument), each frame exposed over half its turn (cook blurs them,
+ * whitted does not); the rest stays put.
  * FunWithRefraction renders frame 0, FunWithRefractionMovie all 96.
  * 720 x 720, 64 spp, halton under cook. Make the movie with
  *   ffmpeg -framerate 24 -i renders/1_Whitted/1_TestScenes/FunWithRefractionMovie/FunWithRefractionMovie_%03d.png
@@ -38,8 +54,9 @@ static void FunWithRefractionScene(int frame)
     RtMaterial m0 = {{0.05812f, 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0.269191f, 0, 0.0f, 1.5f, {0.0f, 0.0f, 0.0f}};
     RtMaterial m1 = {{0.47f, 0.0f, 0.0209248f}, {0.0f, 0.0f, 0.0f}, 0.269191f, 0, 0.0f, 1.5f, {0.0f, 0.0f, 0.0f}};
     RtMaterial m2 = {{0.0513605f, 0.025668f, 0.5f}, {0.0f, 0.0f, 0.0f}, 0.269191f, 0, 0.0f, 1.5f, {0.0f, 0.0f, 0.0f}};
-    RtMaterial m3 = {{0.194609f, 0.192348f, 0.204082f}, {1.0f, 1.0f, 1.0f}, 0.139522f, 0, 0.85f, 1.5f, {0.0f, 0.0f, 0.0f}};
-    RtMaterial m4 = {{0.045f, 0.055f, 0.08f}, {0.5f, 0.5f, 0.5f}, 0.13211f, 0, 0.85f, 1.5f, {0.0f, 0.0f, 0.0f}};
+    /* the ball and the slab: clear glass, roughness 0 (any roughness is frost under cook and kajiya) */
+    RtMaterial m3 = {{0.194609f, 0.192348f, 0.204082f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0, 0.85f, 1.5f, {0.0f, 0.0f, 0.0f}};
+    RtMaterial m4 = {{0.045f, 0.055f, 0.08f}, {0.5f, 0.5f, 0.5f}, 0.0f, 0, 0.85f, 1.5f, {0.0f, 0.0f, 0.0f}};
     static const RtPoint ps0[36] = {
         {-1.19112f, 1.43378f, 2.08234f}, {-1.19083f, -0.493891f, 1.54934f}, {3.15848f, -0.357657f, 1.05904f},
         {-1.19112f, 1.43378f, 2.08234f}, {3.15848f, -0.357657f, 1.05904f}, {3.15819f, 1.57001f, 1.59204f},
@@ -81,13 +98,15 @@ static void FunWithRefractionScene(int frame)
         rtAmbient(ka);
         rtMaxDepth(10);
         for (int f = 0; f < frames; f++) {
-            if (frame >= 0 && f != frame)
+            if (frame >= 0 && f != frame) {
                 continue;
+            }
             char name[80];
-            if (frame >= 0)
+            if (frame >= 0) {
                 snprintf(name, sizeof name, "1_TestScenes/FunWithRefraction");
-            else
+            } else {
                 snprintf(name, sizeof name, "1_TestScenes/FunWithRefractionMovie/FunWithRefractionMovie_%03d", f);
+            }
             rtDisplay(name);
             if (!rtWorldBegin(f)) { /* --frames left this frame out */
                 continue;
