@@ -5,7 +5,8 @@
 //! cosine (and the lobe its exponent). The caller checks the support.
 //! Until you write a warp, it stops the program when called.
 
-use ultraviolet::{Vec2, Vec3};
+use ultraviolet::{Vec2, Vec2x4, Vec3, Vec3x4};
+use wide::{CmpEq, CmpGt, f32x4};
 
 /// A point in the unit disk, (x, y, 0), by Shirley and Chiu's concentric
 /// map. Density 1 / pi over the disk's area.
@@ -24,6 +25,23 @@ pub fn sample_concentric_disk(uv: Vec2) -> Vec3 {
     };
     let (s, c) = phi.sin_cos();
     Vec3::new(r * c, r * s, 0.)
+}
+#[inline]
+pub fn sample_concentric_diskx4(uv: Vec2x4) -> Vec3x4 {
+    let ab = Vec2x4::broadcast(f32x4::splat(2.)) * uv - Vec2x4::one();
+    let g = ab.x.abs().cmp_gt(ab.y.abs());
+    let r = g.blend(ab.x, ab.y);
+    let phi = g.blend(
+        f32x4::FRAC_PI_4 * (ab.y / ab.x),
+        f32x4::FRAC_PI_2 - f32x4::FRAC_PI_4 * (ab.x / ab.y),
+    );
+    let (s, c) = phi.sin_cos();
+
+    Vec3x4::blend(
+        ab.x.cmp_eq(f32x4::ZERO) & ab.y.cmp_eq(f32x4::ZERO),
+        Vec3x4::zero(),
+        Vec3x4::new(r * c, r * s, f32x4::ZERO),
+    )
 }
 pub const fn concentric_disk_pdf() -> f32 {
     core::f32::consts::FRAC_1_PI
@@ -102,7 +120,7 @@ pub mod test {
 
     use super::*;
     use crate::options::Options;
-    use crate::utils::sampler::make_sampler;
+    use crate::utils::samplers::make_sampler;
     pub fn run_warp_test(o: &Options) -> i32 {
         let w = o.warp.as_str();
         let param = o.warp_param;
@@ -120,16 +138,12 @@ pub mod test {
             );
             return 1;
         }
-        let name = if o.sampler.is_empty() {
-            "independent"
-        } else {
-            o.sampler.as_str()
-        };
+        let name = o.sampler.unwrap_or(crate::options::Sampler::Independent);
         let mut sampler = make_sampler(name, o.warp_count, o.seed);
         let stdout = std::io::stdout();
         let mut out = BufWriter::with_capacity(1 << 16, stdout.lock());
         for i in 0..o.warp_count {
-            sampler.start_pixel_sample(0, 0, i);
+            sampler.start_pixel_sample(0, 0, i as _);
             let u = sampler.next_2d();
             let (p, pdf) = match w {
                 "disk" => (sample_concentric_disk(u), concentric_disk_pdf()),

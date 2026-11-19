@@ -45,6 +45,11 @@ impl Rayx4 {
     #[inline]
     pub fn push(&mut self, hit: Hitx4) {
         self.max_t = self.max_t.min(hit.t);
+        for i in (0..self.hits.len()).rev() {
+            if self.hits[i].t.cmp_le(self.max_t).none() {
+                self.hits.remove(i);
+            }
+        }
         self.hits.push(hit);
     }
 

@@ -6,7 +6,6 @@ use std::{
 use ultraviolet::Vec3;
 
 use super::*;
-use crate::AOV;
 use crate::engine::{Screen, integrators};
 use crate::options::{Integrator, OPTIONS, Options};
 use crate::utils::{
@@ -14,6 +13,10 @@ use crate::utils::{
     texture,
     timer::{RenderBudget, Timer},
 };
+use crate::{AOV, options::Sampler, utils::samplers};
+
+/// Maximum Concurrent Rays
+const RAY_CONCURRENCY: u32 = 2u32.pow(22);
 
 /// The graphics state. rtBegin resets it to the defaults listed at
 /// rtBegin. Options and attributes persist across rtWorldBegin/End pairs;
@@ -45,7 +48,7 @@ pub struct ScreenState {
      * through a pinhole, one ray per pixel center, with plain ambient. */
     pub lens_radius: f32,
     pub focus_distance: f32,
-    pub sampler: String,
+    pub sampler: Sampler,
     pub ao_distance: f32,
     pub has_portal: bool, /* rtEnvironmentPortal's quad, world space; sampling the environment through it is
                           HW3 extra credit, and nothing reads it until then */
@@ -74,7 +77,7 @@ impl ScreenState {
             exposure: 0.0,
             lens_radius: 0.0,
             focus_distance: 1.0,
-            sampler: String::new(),
+            sampler: Sampler::Center,
             ao_distance: 0.0,
             has_portal: false,
             portal: [[0.0; 3]; 4],
@@ -125,7 +128,7 @@ pub extern "C" fn rtBegin() {
     *s = ScreenState::new();
     s.display = "out".to_string();
     s.tonemap = "none".to_string();
-    s.sampler = "independent".to_string();
+    s.sampler = Sampler::Independent;
     transform::clear();
     texture::clear();
 }
@@ -189,7 +192,7 @@ pub unsafe extern "C" fn rtColorGrade(tint: &RtColor, vignette: RtFloat) {
 /// kajiya (HW3, HW4) use it.
 #[unsafe(no_mangle)]
 pub extern "C" fn rtPixelSamples(spp: RtInt) {
-    state().samples = spp.max(1) as _;
+    state().samples = spp.max(1).isqrt() as _;
 }
 
 /// The deepest secondary ray: a ray at depth d spawns children only if
@@ -300,16 +303,16 @@ pub extern "C" fn rtLens(radius: RtFloat, focus_distance: RtFloat) {
 pub unsafe extern "C" fn rtSampler(name: *const c_char) {
     let n = text(name);
     let mut s = state();
-    if ["independent", "stratified", "halton", "sobol"].contains(&n.as_str()) {
-        s.sampler = n;
-    } else {
-        eprintln!(
+    let sampstr = n.as_str();
+    match sampstr.try_into() {
+        Ok(sampler) => s.sampler = sampler,
+        Err(_) => eprintln!(
             "{}: rtSampler(\"{}\"): not a sampler, keeping {}",
             OPTIONS.read().unwrap().scene,
-            n,
-            s.sampler
-        );
-    }
+            sampstr,
+            s.sampler.to_string()
+        ),
+    };
 }
 
 #[unsafe(no_mangle)]
@@ -346,48 +349,10 @@ pub extern "C" fn rtWorldBegin(frame: RtInt) -> RtInt {
     (o.frame_first < 0 || (frame >= o.frame_first && frame <= o.frame_last)) as RtInt
 }
 
-/// Build the acceleration structure, render, write the image and output the
-/// TIME line (HW2 handout: timing):
-///     TIME <scene> build=<s> render=<s> total=<s> threads=<n>
-/// build is the light list and the BVH, render the pixel loop, total
-/// includes writing the image; all three come from timer.rs's Timer. The
-/// command line overrides the scene's format, samples and depth here
-/// (options().width, .height, .spp, .max_depth, .ambient; .aov picks a
-/// debug image, .lens the lens).
-///
-/// The finished pixel loop (Workflow, steps 5 and 15): 16 x 16 tiles handed out from an atomic
-/// counter to a pool of workers (rayon or std::thread), each writing only
-/// its tile, so the image is the same at any thread count; trace_begin(px,
-/// py) before a pixel and trace_end() after it (debug.rs); the time budget
-/// of timer.rs (RenderBudget: its tile_order, expired() before each tile
-/// and row, done() per row, report() after the TIME line). Under whitted
-/// one ray through each pixel's center, time 0.
-/// The debug images this renderer writes (--aov; debug.rs has the
-/// encoders). HW3 adds ao.
-#[inline]
-fn is_aov(name: &str) -> bool {
-    [
-        "raydir", "normal", "ng", "depth", "uv", "albedo", "cost", "shadow",
-    ]
-    .contains(&name)
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn rtWorldEnd() {
     let o = OPTIONS.read().unwrap();
-    if !o.aov.is_empty() && !is_aov(&o.aov) {
-        eprintln!(
-            "{}: --aov {}: not an image this renderer writes; it has raydir, normal, ng, depth, uv, albedo, cost and shadow",
-            o.scene, o.aov
-        );
-        std::process::exit(1);
-    }
-
     let mut s = state();
-    s.max_depth = o.max_depth as _; // if max_depth is -1, it wraps back to u16::MAX, which is correct.
-    if let Some(ambient) = o.ambient {
-        s.ambient = ambient.into();
-    }
     if let Some(width) = o.width {
         s.res.0 = width.into();
     }
@@ -395,13 +360,24 @@ pub extern "C" fn rtWorldEnd() {
         s.res.1 = height.into();
     }
     if let Some(spp) = o.spp {
-        let spp: u16 = spp.into();
-        s.samples = spp as _;
+        s.samples = spp.isqrt().get() as _;
     }
-    let pixels = s.res.0 as u64 * s.res.1 as u64;
+    if o.max_depth >= 0 {
+        s.max_depth = o.max_depth as _;
+    }
+    if let Some(ambient) = o.ambient {
+        s.ambient = ambient.into();
+    }
+    if let Some(sampler) = o.sampler {
+        s.sampler = sampler;
+    }
+    if o.lens >= 0. {
+        s.lens_radius = o.lens;
+    }
+    let seed = o.seed;
 
     let total = Timer::new();
-    let (build_time, render, budget, rgb) = {
+    let (build_time, render_time, budget, frame) = {
         let mut world = world::take();
         world.ambientcolor = s.ambient.into();
         world.environmentcolor = s.background.into();
@@ -410,27 +386,105 @@ pub extern "C" fn rtWorldEnd() {
         world.environmentrotation = s.environment_rotate_y.to_radians();
         world.finish();
 
-        let fwd = (s.lookat - s.eye).normalized();
-        let up = fwd.cross(s.up).cross(fwd).normalized();
-        let fov = s.fovy.to_radians();
-        let res = (s.res.0 as _, s.res.1 as _);
-        let mut screen = Screen::create(s.eye, fwd, up, fov, res);
-        let build_time = total.seconds();
+        let mut frame = vec![Vec3::zero(); s.res.0 as usize * s.res.1 as usize].into_boxed_slice();
 
+        let halfheight = (s.fovy.to_radians() / 2.).tan();
+
+        let tofwd = (s.lookat - s.eye).normalized();
+        let up = tofwd.cross(s.up).cross(tofwd).normalized();
+        let totop = halfheight * up;
+        let torgh = halfheight * (s.res.0 as f32 / s.res.1 as f32) * Vec3::cross(&tofwd, up);
+        let res: (u32, u32, u32) = (s.res.0 as _, s.res.1 as _, s.samples as _);
+
+        let build_time = total.seconds();
         let render = Timer::new();
         let budget = RenderBudget::new(o.time_limit); /* --time-limit: the clock starts here (timer.rs) */
 
-        match o.integrator {
-            Integrator::Whitted => screen.process::<integrators::Whitted>(&world, s.max_depth),
-            Integrator::Cook => screen.process::<integrators::Cook>(&world, s.max_depth),
-            _ => unimplemented!(),
-        };
+        let step = RAY_CONCURRENCY / (res.0 * res.2 * res.2);
+        for i in (0..res.1).step_by(step as usize) {
+            let hslice = i..((i + step) as u32).min(res.1);
+            let pixels = hslice.len() as u64 * (res.0 as u64);
 
-        (build_time, render, budget, screen.write())
+            let mut screen = match s.sampler {
+                Sampler::Center => Screen::create::<samplers::Center>(
+                    frame,
+                    s.eye,
+                    tofwd,
+                    totop,
+                    torgh,
+                    s.focus_distance,
+                    s.lens_radius,
+                    res,
+                    hslice,
+                    seed,
+                ),
+                Sampler::Independent => Screen::create::<samplers::Independent>(
+                    frame,
+                    s.eye,
+                    tofwd,
+                    totop,
+                    torgh,
+                    s.focus_distance,
+                    s.lens_radius,
+                    res,
+                    hslice,
+                    seed,
+                ),
+                Sampler::Stratified => Screen::create::<samplers::Stratified>(
+                    frame,
+                    s.eye,
+                    tofwd,
+                    totop,
+                    torgh,
+                    s.focus_distance,
+                    s.lens_radius,
+                    res,
+                    hslice,
+                    seed,
+                ),
+                Sampler::Halton => Screen::create::<samplers::Halton>(
+                    frame,
+                    s.eye,
+                    tofwd,
+                    totop,
+                    torgh,
+                    s.focus_distance,
+                    s.lens_radius,
+                    res,
+                    hslice,
+                    seed,
+                ),
+                Sampler::Sobol => Screen::create::<samplers::Sobol>(
+                    frame,
+                    s.eye,
+                    tofwd,
+                    totop,
+                    torgh,
+                    s.focus_distance,
+                    s.lens_radius,
+                    res,
+                    hslice,
+                    seed,
+                ),
+            };
+
+            match o.integrator {
+                Integrator::Whitted => screen.process::<integrators::Whitted>(&world, s.max_depth),
+                Integrator::Cook => screen.process::<integrators::Cook>(&world, s.max_depth),
+                _ => unimplemented!(),
+            };
+
+            frame = screen.write();
+            budget.done(pixels);
+            if budget.expired() {
+                break;
+            }
+        }
+
+        let render_time = render.seconds();
+        budget.finish();
+        (build_time, render_time, budget, frame)
     };
-    budget.done(pixels);
-    budget.finish();
-    let render_time = render.seconds();
 
     /* The scene's tone map and exposure, unless the command line says
      * otherwise; a debug image (--aov) is written as it is. */
@@ -454,7 +508,7 @@ pub extern "C" fn rtWorldEnd() {
         &crate::cmdline::image_path(&s.display),
         s.res.0 as _,
         s.res.1 as _,
-        &rgb,
+        frame,
         o.pfm,
         &tonemap,
         exposure,
@@ -476,5 +530,10 @@ pub extern "C" fn rtWorldEnd() {
         total.seconds(),
         thread_count(&o)
     );
-    budget.report(&scene_name, render_time, pixels, s.samples as _);
+    budget.report(
+        &scene_name,
+        render_time,
+        s.res.0 as u64 * s.res.1 as u64,
+        (s.samples * s.samples) as _,
+    );
 }

@@ -12,7 +12,7 @@
 use std::io::Write;
 use std::sync::OnceLock;
 
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use image::GenericImageView;
 use ultraviolet::Vec3;
 
 #[inline]
@@ -129,8 +129,9 @@ fn tone_map(name: &str) -> fn(f32) -> f32 {
 
 /// A number in [0, 1) from a pixel's index (a 32-bit integer hash), the
 /// same for its three channels: the dither above.
-fn pixel_noise(pixel: usize) -> f32 {
-    let mut h = (pixel as u32).wrapping_mul(2654435761);
+#[inline]
+const fn pixel_noise(pixel: u32) -> f32 {
+    let mut h = pixel.wrapping_mul(2654435761);
     h ^= h >> 15;
     h = h.wrapping_mul(2246822519);
     h ^= h >> 13;
@@ -143,42 +144,37 @@ fn pixel_noise(pixel: usize) -> f32 {
 /// sRGB and the dither below.
 fn write_8bit(
     path: &str,
-    w: usize,
-    h: usize,
-    rgb: &Box<[Vec3]>,
+    format: &str,
+    rgb: &image::Rgb32FImage,
     tonemap: &str,
     exposure: f32,
-    format: &str,
     tint: Vec3,
     vignette: f32,
 ) -> bool {
     let tone = tone_map(tonemap);
-    let scale = 2.0f32.powf(exposure);
-    let gain = scale * tint;
+    let gain = exposure.exp2() * tint;
     /* The vignette: 1 - vignette r^2, r the distance from the image's
      * center with the corners at 1 (rtColorGrade). */
-    let (cx, cy) = (0.5 * (w - 1) as f32, 0.5 * (h - 1) as f32);
-    let corner2 = (cx * cx + cy * cy).max(1.0);
-    /* Dithered: a value between two 8-bit levels goes to the upper one with
-     * the probability of its position between them, decided by a hash of
-     * the pixel, so a slow gradient in a dark region breaks into fine noise
-     * instead of bands (a deterministic hash: the same image every run).
-     * The PFM carries the exact values. */
-    let bytes: Vec<u8> = rgb
-        .par_iter()
-        .enumerate()
-        .flat_map_iter(|(i, &v)| {
-            let (dx, dy) = ((i % w) as f32 - cx, (i / w) as f32 - cy);
-            let falloff = (1.0 - vignette * (dx * dx + dy * dy) / corner2).max(0.0);
-            (v * gain * falloff)
-                .as_array()
-                .map(|v| to8(tone(if v > 0.0 { v } else { 0.0 }), pixel_noise(i)))
-        })
-        .collect();
+    let (cx, cy) = (
+        0.5 * (rgb.width() - 1) as f32,
+        0.5 * (rgb.height() - 1) as f32,
+    );
+    let corner2 = (cx * cx + cy * cy).max(1.0).recip();
+
+    let image = image::RgbImage::from_par_fn(rgb.width(), rgb.height(), |x, y| {
+        let v = unsafe { rgb.unsafe_get_pixel(x, y) };
+        let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+        let falloff = (1.0 - vignette * (dx * dx + dy * dy) * corner2).max(0.0);
+        let noise = pixel_noise(x + y * rgb.width());
+        (Vec3::from(v.0) * gain * falloff)
+            .as_array()
+            .map(|v| to8(tone(v.max(0.)), noise))
+            .into()
+    });
+
     /* The fastest deflate and no row filtering: a slow PNG write would show
      * in the TIME line's total (the benchmark ranks by build + render). A
      * JPEG at quality 92, as the C++ kit's stb_image_write writes it. */
-    use image::ImageEncoder;
     use image::codecs::jpeg::JpegEncoder;
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
     let file = match std::fs::File::create(path) {
@@ -189,18 +185,20 @@ fn write_8bit(
         }
     };
     let out = std::io::BufWriter::new(file);
-    let color = image::ExtendedColorType::Rgb8;
     let written = if format == "jpg" {
-        JpegEncoder::new_with_quality(out, 92).write_image(&bytes, w as _, h as _, color)
+        image.write_with_encoder(JpegEncoder::new_with_quality(out, 92))
     } else {
-        PngEncoder::new_with_quality(out, CompressionType::Fast, FilterType::NoFilter)
-            .write_image(&bytes, w as _, h as _, color)
+        image.write_with_encoder(PngEncoder::new_with_quality(
+            out,
+            CompressionType::Fast,
+            FilterType::NoFilter,
+        ))
     };
     if written.is_err() {
         eprintln!("could not write {}", path);
         return false;
     }
-    println!("wrote {} ({} x {})", path, w, h);
+    println!("wrote {} ({} x {})", path, image.width(), image.height());
     true
 }
 
@@ -211,7 +209,7 @@ fn write_pfm(
     path: &str,
     w: usize,
     h: usize,
-    rgb: &Box<[Vec3]>,
+    rgb: &[Vec3],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = std::fs::File::create(path)?;
     let mut out = std::io::BufWriter::new(file);
@@ -233,7 +231,7 @@ fn write_pfm(
     path: &str,
     w: usize,
     h: usize,
-    rgb: &Box<[Vec3]>,
+    rgb: &[Vec3],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = std::fs::File::create(path)?;
     let mut out = std::io::BufWriter::new(file);
@@ -256,9 +254,9 @@ fn write_pfm(
 /// image_path makes it). True if every file was written, else stderr says.
 pub fn write_image(
     path: &str,
-    w: i32,
-    h: i32,
-    rgb: &Box<[Vec3]>,
+    w: u32,
+    h: u32,
+    rgb: Box<[Vec3]>,
     pfm: bool,
     tonemap: &str,
     exposure: f32,
@@ -266,19 +264,24 @@ pub fn write_image(
     tint: Vec3,
     vignette: f32,
 ) -> bool {
+    let dst = image::Rgb32FImage::from_raw(w, h, bytemuck::cast_slice_box(rgb).into_vec()).unwrap();
     let mut ok = write_8bit(
         &format!("{}.{}", path, format),
-        w as _,
-        h as _,
-        rgb,
+        format,
+        &dst,
         tonemap,
         exposure,
-        format,
         tint,
         vignette,
     );
     if pfm {
-        ok &= write_pfm(&format!("{}.pfm", path), w as _, h as _, rgb).is_ok();
+        ok &= write_pfm(
+            &format!("{}.pfm", path),
+            w as _,
+            h as _,
+            bytemuck::cast_slice(dst.as_raw()),
+        )
+        .is_ok();
     }
     ok
 }

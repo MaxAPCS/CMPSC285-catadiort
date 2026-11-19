@@ -15,7 +15,6 @@ pub(crate) use primitivemesh::*;
 pub(crate) use primitivesphere::*;
 
 pub(super) trait Primitive {
-    #[allow(dead_code)]
     fn bounds(&self) -> (Vec3, Vec3);
     fn centroid(&self) -> Vec3;
 

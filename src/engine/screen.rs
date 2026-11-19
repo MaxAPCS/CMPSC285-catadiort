@@ -1,11 +1,14 @@
+use core::ops::Range;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
+    ParallelIterator,
 };
 use rayon::slice::ParallelSlice;
 use ultraviolet::{Vec3, Vec3x4};
 use wide::f32x4;
 
 use super::{integrators::Integrator, ray, wider, world};
+use crate::utils::{samplers, warp};
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
 
@@ -18,30 +21,68 @@ pub(crate) struct Screen {
 
 impl Screen {
     /// Arguments:
-    /// - eyepos: camera position
-    /// - fwd: ray into screen, normalized
-    /// - up: ray to screen top, normalized, perpendicular to fwd
-    /// - fov: vertical field of view, radians
-    pub fn create(eyepos: Vec3, fwd: Vec3, up: Vec3, fov: f32, screen: (u32, u32)) -> Self {
-        debug_assert!(screen.0 * screen.1 % 4 == 0);
-        let (w, h) = (screen.0 as f32, screen.1 as f32);
-        let halfheight = (fov / 2.).tan();
-        let tofwd = Vec3x4::splat(fwd);
-        let totop = Vec3x4::splat(halfheight * up);
-        let torgh = Vec3x4::splat(halfheight * (w / h) * Vec3::cross(&fwd, up));
+    /// - frame: persistent frame
+    /// - focusdst: focal plane distance, scene units
+    /// - lensrad: lens radius, ??? units
+    /// - res: (width, height, sqrt(samples))
+    /// - hslice: range of heights
+    /// - seed: sampler pcg32 seed
+    pub fn create<S: samplers::Sampler>(
+        frame: Box<[Vec3]>,
+        eyepos: Vec3,
+        tofwd: Vec3,
+        totop: Vec3,
+        torgh: Vec3,
+        focusdst: f32,
+        lensrad: f32,
+        res: (u32, u32, u32),
+        hslice: Range<u32>,
+        seed: u64,
+    ) -> Self {
+        debug_assert!((res.0 * hslice.len() as u32 * res.2 * res.2) % 4 == 0);
+        debug_assert_eq!(frame.len() as u32, res.0 * res.1);
+
+        let eyepos = Vec3x4::splat(eyepos);
+        let tofwd = Vec3x4::splat(tofwd);
+        let totop = Vec3x4::splat(totop);
+        let torgh = Vec3x4::splat(torgh);
+
+        let (wi, hi) = (
+            f32x4::splat((res.0 as f32).recip()),
+            f32x4::splat((res.1 as f32).recip()),
+        );
+        let weights = wider::gaussian_weights(res.2 as _);
+
         Self {
-            frame: vec![Vec3::zero(); (screen.0 * screen.1) as usize].into_boxed_slice(),
-            raysone: wider::Chunku32x4::from(
-                (0..screen.1).flat_map(|j| (0..screen.0).map(move |i| (i, j))),
-            )
-            .map(|(i, j)| {
-                let x: f32x4 = (wider::cast_f32x4(i) + 0.5) / w;
-                let y: f32x4 = (wider::cast_f32x4(j) + 0.5) / h;
-                let dir = (tofwd + (2. * x - 1.) * torgh + (1. - 2. * y) * totop).normalized();
+            frame,
+            raysone: wider::Chunku32x4::from(hslice.flat_map(|j| {
+                (0..res.0).flat_map(move |i| {
+                    (0..res.2).flat_map(move |nj| (0..res.2).map(move |ni| [i, j, ni, nj]))
+                })
+            }))
+            .par_bridge()
+            .map(|[i, j, ni, nj]| {
+                let n = nj * res.2 + ni;
+                let mut s = samplers::Samplerx4::<S>::pixel(i, j, n, (res.2 * res.2) as _, seed);
+                let film = s.next();
+                let x = (wider::cast_f32x4(i) + film.x) * wi;
+                let y = (wider::cast_f32x4(j) + film.y) * hi;
+
+                let mut raysrc = eyepos;
+                let mut raydir =
+                    (tofwd + (2. * x - 1.) * torgh + (1. - 2. * y) * totop).normalized();
+
+                let lens = warp::sample_concentric_diskx4(s.next());
+                if lensrad > 0. {
+                    raysrc = eyepos + (torgh * lens.x + totop * lens.y) * f32x4::splat(lensrad);
+                    let lensdst = eyepos + raydir * (focusdst / (raydir.dot(tofwd)));
+                    raydir = (lensdst - raysrc).normalized();
+                }
+
                 (
-                    (j * screen.0 + i).into(),
-                    Vec3x4::one(),
-                    ray::Rayx4::new(Vec3x4::splat(eyepos), dir),
+                    (j * res.0 + i).into(),
+                    Vec3x4::broadcast(n.as_array_ref().map(|n| weights[n as usize]).into()),
+                    ray::Rayx4::new(raysrc, raydir),
                 )
             })
             .collect(),
@@ -49,6 +90,7 @@ impl Screen {
         }
     }
 
+    #[allow(private_bounds)]
     pub fn process<I: Integrator>(&mut self, world: &world::World, max_depth: u16) {
         #[cfg(any(
             feature = "aovraydir",
@@ -146,9 +188,12 @@ impl Screen {
 
         // Finish Pass
         #[cfg(debug_assertions)]
-        println!("screen: pass count src {} dst {}", src.len(), dst.len());
+        println!(
+            "screen: pass count src {} dst {}",
+            src.len() * 4,
+            dst.len() * 4
+        );
         src.clear();
-        dst.shrink_to_fit();
     }
 
     #[allow(unused_variables, unused_mut)]

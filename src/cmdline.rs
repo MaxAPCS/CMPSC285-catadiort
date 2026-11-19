@@ -423,7 +423,14 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
             }
             "--width" => o.width = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
             "--height" => o.height = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
-            "--spp" => o.spp = positive_int(a, value_of(args, &mut i, a)).try_into().ok(),
+            "--spp" => {
+                o.spp = positive_int(a, value_of(args, &mut i, a)).try_into().ok();
+                if let Some(spp) = o.spp
+                    && spp.isqrt().saturating_pow(2) != spp
+                {
+                    fail(&format!("--spp: {} not perfect square", spp))
+                };
+            }
             "--max-depth" => o.max_depth = integer_at_least(a, value_of(args, &mut i, a), 0),
             "--threads" => o.threads = positive_int(a, value_of(args, &mut i, a)) as _,
             "--no-accel" => o.no_accel = true,
@@ -475,12 +482,13 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                 }
             }
             "--sampler" => {
-                o.sampler = value_of(args, &mut i, a).to_string();
-                if !["independent", "stratified", "halton", "sobol"].contains(&o.sampler.as_str()) {
-                    fail(&format!(
+                let sampstr = value_of(args, &mut i, a).to_string();
+                match sampstr.as_str().try_into() {
+                    Ok(sampler) => o.sampler = Some(sampler),
+                    Err(_) => fail(&format!(
                         "--sampler: independent, stratified, halton or sobol, not '{}'",
-                        o.sampler
-                    ));
+                        sampstr
+                    )),
                 }
             }
             "--seed" => {

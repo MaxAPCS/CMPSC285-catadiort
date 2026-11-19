@@ -33,7 +33,8 @@ pub enum Integrator {
 }
 
 impl Integrator {
-    pub fn folder(&self) -> &str {
+    #[inline]
+    pub const fn folder(&self) -> &str {
         match self {
             Integrator::Whitted => "1_Whitted",
             Integrator::Cook => "2_Cook",
@@ -61,6 +62,42 @@ impl ToString for Integrator {
             Self::Whitted => "whitted".to_string(),
             Self::Cook => "cook".to_string(),
             Self::Kajiya => "kajiya".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Sampler {
+    Center,
+    Independent,
+    Stratified,
+    Halton,
+    Sobol,
+}
+
+impl TryFrom<&str> for Sampler {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "center" => Self::Center,
+            "independent" => Self::Independent,
+            "stratified" => Self::Stratified,
+            "halton" => Self::Halton,
+            "sobol" => Self::Sobol,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl ToString for Sampler {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Center => "center".to_string(),
+            Self::Independent => "independent".to_string(),
+            Self::Stratified => "stratified".to_string(),
+            Self::Halton => "halton".to_string(),
+            Self::Sobol => "sobol".to_string(),
         }
     }
 }
@@ -94,11 +131,11 @@ pub struct Options {
                           from 0); -1: every frame */
     pub frame_last: i32,
     pub lens: f32, /* --lens R: the lens radius, overriding the scene's rtLens (0: a pinhole); -1: the scene's */
-    pub sampler: String, /* --sampler independent|stratified|halton|sobol (HW3); "": the scene's rtSampler */
-    pub seed: u64,       /* --seed N (HW3): the same seed gives the same image */
+    pub sampler: Option<Sampler>, /* --sampler independent|stratified|halton|sobol (HW3); "": the scene's rtSampler */
+    pub seed: u64,                /* --seed N (HW3): the same seed gives the same image */
     pub light_samples: i32, /* --light-samples N (HW3): cook samples every light N times at a hit */
-    pub warp: String,    /* --warptest WARP N [PARAM] (HW3): the warp, "" when not testing one */
-    pub warp_count: i32, /*   how many samples to print */
+    pub warp: String,       /* --warptest WARP N [PARAM] (HW3): the warp, "" when not testing one */
+    pub warp_count: i32,    /*   how many samples to print */
     pub warp_param: f32, /*   uniform_cone's cosThetaMax, phong's exponent or ggx's alpha; 0 for the others */
     pub bsdf_test: bool, /* --bsdftest [ARG ...] (HW4): check the BSDFs instead of rendering */
     pub bsdf_test_args: Vec<String>, /* the arguments after it, up to the next option */
@@ -135,7 +172,7 @@ impl Options {
             frame_first: -1,
             frame_last: -1,
             lens: -1.0,
-            sampler: String::new(),
+            sampler: None,
             seed: 0,
             light_samples: 1,
             warp: String::new(),

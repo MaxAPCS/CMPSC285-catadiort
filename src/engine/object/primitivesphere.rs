@@ -57,22 +57,24 @@ impl Primitive for Sphere {
             if t1 >= ray.max_t {
                 return;
             }
-            let opos1 = ropos + rodir * t1;
-            let wpos1 = ray.pos + ray.dir * t1;
-            let wnorm1 = self.owtrans_dual.transform_vec3(opos1).normalized();
-            let uv1 = Self::uv(opos1);
-            if (t1 > 0.) && self.cutout(wpos1, ray.dir, wnorm1, t1, opos1, uv1, depth) {
-                ray.hits.push(ray::Hit {
-                    opos: opos1,
-                    wpos: wpos1,
-                    wdir: ray.dir,
-                    wnorm: wnorm1,
-                    t: t1,
-                    norm: wnorm1,
-                    uv: uv1,
-                    color: Vec3::broadcast(f32::NAN),
-                    material: Some(self.material.clone()),
-                });
+            if t1 > 0. {
+                let opos1 = ropos + rodir * t1;
+                let wpos1 = ray.pos + ray.dir * t1;
+                let wnorm1 = self.owtrans_dual.transform_vec3(opos1).normalized();
+                let uv1 = Self::uv(opos1);
+                if self.cutout(wpos1, ray.dir, wnorm1, t1, opos1, uv1, depth) {
+                    ray.hits.push(ray::Hit {
+                        opos: opos1,
+                        wpos: wpos1,
+                        wdir: ray.dir,
+                        wnorm: wnorm1,
+                        t: t1,
+                        norm: wnorm1,
+                        uv: uv1,
+                        color: Vec3::broadcast(f32::NAN),
+                        material: Some(self.material.clone()),
+                    });
+                }
             }
         }
 
@@ -85,28 +87,29 @@ impl Primitive for Sphere {
             if t2 >= ray.max_t {
                 return;
             }
-            let opos2 = ropos + rodir * t2;
-            let wpos2 = ray.pos + ray.dir * t2;
-            let wnorm2 = self.owtrans_dual.transform_vec3(opos2).normalized();
-            let uv2 = Self::uv(opos2);
-            if (t2 > 0.) && self.cutout(wpos2, ray.dir, wnorm2, t2, opos2, uv2, depth) {
-                ray.hits.push(ray::Hit {
-                    opos: opos2,
-                    wpos: wpos2,
-                    wdir: ray.dir,
-                    wnorm: wnorm2,
-                    t: t2,
-                    norm: wnorm2,
-                    uv: uv2,
-                    color: Vec3::broadcast(f32::NAN),
-                    material: Some(self.material.clone()),
-                });
+            if t2 > 0. {
+                let opos2 = ropos + rodir * t2;
+                let wpos2 = ray.pos + ray.dir * t2;
+                let wnorm2 = self.owtrans_dual.transform_vec3(opos2).normalized();
+                let uv2 = Self::uv(opos2);
+                if self.cutout(wpos2, ray.dir, wnorm2, t2, opos2, uv2, depth) {
+                    ray.hits.push(ray::Hit {
+                        opos: opos2,
+                        wpos: wpos2,
+                        wdir: ray.dir,
+                        wnorm: wnorm2,
+                        t: t2,
+                        norm: wnorm2,
+                        uv: uv2,
+                        color: Vec3::broadcast(f32::NAN),
+                        material: Some(self.material.clone()),
+                    });
+                }
             }
         }
     }
 
     fn intersect(&self, rays: &mut ray::Rayx4, depth: u16) {
-        // Ray Object-Space Position & Direction
         let ropos = wider::transform_pointx4d(&self.wotrans, &rays.pos);
         let rodir = wider::transform_vecx4d(&self.wotrans, &rays.dir);
 
@@ -126,14 +129,13 @@ impl Primitive for Sphere {
         let opos1 = ropos + rodir * t1;
         let wpos1 = rays.pos + rays.dir * t1;
         let uv1 = Self::uvx4(opos1);
-
         let m1 = t1.cmp_ge(f32x4::ZERO) & self.cutoutx4(wpos1, rays.dir, t1, opos1, uv1, depth);
 
         if m1.all() {
-            let wnorm = wider::transform_vecx4(&self.owtrans_dual, opos1).normalized();
-            if t1.cmp_ge(rays.max_t).all() {
+            if t1.cmp_lt(rays.max_t).none() {
                 return;
             }
+            let wnorm = wider::transform_vecx4(&self.owtrans_dual, opos1).normalized();
             rays.push(ray::Hitx4 {
                 opos: opos1,
                 wpos: wpos1,
@@ -151,22 +153,16 @@ impl Primitive for Sphere {
         let t2 = wider::cast_f32((-b + discrim.sqrt()) / a);
         let opos2 = ropos + rodir * t2;
         let uv2 = Self::uvx4(opos2);
-
         let m2 = wider::cast_f32(discrim.cmp_ne(f64x4::ZERO))
             & t2.cmp_ge(f32x4::ZERO)
             & self.cutoutx4(rays.pos + rays.dir * t2, rays.dir, t2, opos2, uv2, depth);
 
         let t = m1.blend(t1, m2.blend(t2, wider::f32x4_NAN));
-        if t.cmp_ge(rays.max_t).all() {
+        if t.cmp_lt(rays.max_t).none() {
             return;
         }
         let opos = ropos + rodir * t;
         let wnorm = wider::transform_vecx4(&self.owtrans_dual, opos).normalized();
-        let uv = (
-            f32x4::blend(m1, uv1.0, uv2.0),
-            f32x4::blend(m1, uv1.1, uv2.1),
-        );
-
         rays.push(ray::Hitx4 {
             opos,
             wpos: rays.pos + rays.dir * t,
@@ -174,7 +170,10 @@ impl Primitive for Sphere {
             wnorm,
             t,
             norm: wnorm,
-            uv,
+            uv: (
+                f32x4::blend(m1, uv1.0, uv2.0),
+                f32x4::blend(m1, uv1.1, uv2.1),
+            ),
             color: Vec3x4::broadcast(wider::f32x4_NAN),
             material: core::array::from_fn(|_| Some(self.material.clone())),
         })

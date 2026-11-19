@@ -127,6 +127,19 @@ pub fn permutation_element(mut i: u32, n: u32, hash: u32) -> u32 {
     i.wrapping_add(hash) % n
 }
 
+pub fn sobol2(mut i: u32) -> u32 {
+    let mut v = 0x80000000u32;
+    let mut r = 0;
+    while i != 0 {
+        if i & 1 == 1 {
+            r ^= v;
+        }
+        i >>= 1;
+        v ^= v >> 1;
+    }
+    r
+}
+
 /// Owen scrambling in base 2 of a 32-bit number whose bit 31 is the first
 /// digit: every digit is flipped or not by a hash of the seed and the
 /// digits above it (Owen 1995), as Laine and Karras's 2011 hash on the
@@ -232,13 +245,4 @@ impl Pcg32 {
         }
         self.state = acc_mult.wrapping_mul(self.state).wrapping_add(acc_plus);
     }
-}
-
-/// The pixel and the seed pick a PCG32 stream, and sample `index` starts
-/// 65536 steps per index into it, so a sample can use up to 65536 random
-/// numbers before it would run into the next one's. independent draws
-/// every dimension from it, stratified only the jitter inside a cell.
-pub fn start_stream(rng: &mut Pcg32, x: i32, y: i32, index: i32, seed: u64) {
-    rng.set_sequence(hash3(x as u32 as u64, y as u32 as u64, seed), seed);
-    rng.advance((index as u64).wrapping_mul(65536));
 }

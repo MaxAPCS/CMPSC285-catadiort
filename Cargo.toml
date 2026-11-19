@@ -9,7 +9,7 @@ build = "build.rs"
 image = { version = "0.25", default-features = false, features = ["rayon", "png", "jpeg", "bmp", "tga", "hdr"] }
 ultraviolet = { version = "0.10", features = ["f64", "bytemuck"] }
 wide = "^0.7"
-bytemuck = { version = "^1" }
+bytemuck = "1"
 rayon = "1"
 smallvec = { version = "1", features = ["union", "const_new"] }
 

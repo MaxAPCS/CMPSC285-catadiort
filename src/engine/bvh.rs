@@ -133,7 +133,7 @@ impl<P: Primitive> Primitive for BVH<P> {
             let node = &self.nodes[idx as usize];
             let ixt = node.bounds.intersectx4(rays);
             if ixt.cmp_lt(rays.max_t).none() {
-                continue;
+                continue; // culls before cutout filtering; theoretically incorrect
             }
             match node.kind {
                 NodeKind::Leaf { start, len } => {
@@ -279,50 +279,46 @@ fn split_primitive<P: Primitive>(
     prim_geom: &mut [(Bounds, Vec3)],
     centroid_bounds: &Bounds,
 ) -> (usize, usize) {
-    if *SAH && let Some(split) = sah_split(primitives, prim_geom, centroid_bounds) {
-        return split;
+    let centroid_extent = centroid_bounds.max - centroid_bounds.min;
+    let axis = if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
+        0
+    } else if centroid_extent.y >= centroid_extent.z {
+        1
+    } else {
+        2
+    };
+
+    if *SAH && let Some(split) = sah_split(primitives, prim_geom, centroid_bounds, axis) {
+        return (axis, split);
     }
-    midpoint_split(primitives, prim_geom, centroid_bounds)
+    let split = midpoint_split(primitives, prim_geom, centroid_bounds, axis);
+    (axis, split)
 }
 
 fn midpoint_split<P: Primitive>(
     primitives: &mut [P],
     prim_geom: &mut [(Bounds, Vec3)],
     centroid_bounds: &Bounds,
-) -> (usize, usize) {
+    axis: usize,
+) -> usize {
     let total = primitives.len();
-    let centroid_extent = centroid_bounds.max - centroid_bounds.min;
-    let axis = if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
-        0
-    } else if centroid_extent.y >= centroid_extent.z {
-        1
-    } else {
-        2
-    };
 
     let midpoint = 0.5 * (centroid_bounds.min[axis] + centroid_bounds.max[axis]);
-    let mut split =
+    let split =
         pair_partition_unstable_by(primitives, prim_geom, |_, geom| geom.1[axis] < midpoint);
     if split == 0 || split == total {
-        split = total / 2;
+        return total / 2;
     }
-    (axis, split)
+    split
 }
 
 fn sah_split<P: Primitive>(
     primitives: &mut [P],
     prim_geom: &mut [(Bounds, Vec3)],
     centroid_bounds: &Bounds,
-) -> Option<(usize, usize)> {
+    axis: usize,
+) -> Option<usize> {
     let total = primitives.len() as u32;
-    let centroid_extent = centroid_bounds.max - centroid_bounds.min;
-    let axis = if centroid_extent.x >= centroid_extent.y && centroid_extent.x >= centroid_extent.z {
-        0
-    } else if centroid_extent.y >= centroid_extent.z {
-        1
-    } else {
-        2
-    };
 
     let min = centroid_bounds.min[axis];
     let extent = centroid_bounds.max[axis] - min;
@@ -380,7 +376,7 @@ fn sah_split<P: Primitive>(
     if split == 0 || split == total as _ {
         return None;
     }
-    Some((axis, split))
+    Some(split)
 }
 
 fn pair_partition_unstable_by<T, U, F>(a: &mut [T], b: &mut [U], mut pred: F) -> usize

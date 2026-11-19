@@ -195,7 +195,7 @@ impl RenderBudget {
     /// The full frame is total_pixels * spp samples; done, the finished
     /// pixels' and the cut ones' finished samples, plus half a sample per
     /// cut for the one each stopped worker was in.
-    pub fn report(&self, scene: &str, render_seconds: f64, total_pixels: u64, spp: i32) {
+    pub fn report(&self, scene: &str, render_time: f64, total_pixels: u64, spp: i32) {
         if !(self.seconds > 0.0) {
             return;
         }
@@ -203,7 +203,7 @@ impl RenderBudget {
         let samples = pixels * spp as u64 + self.cut_samples.load(Ordering::Relaxed);
         let credit = samples as f64 + 0.5 * self.cuts.load(Ordering::Relaxed) as f64;
         let estimate = if credit > 0.0 {
-            render_seconds * total_pixels as f64 * spp as f64 / credit
+            render_time * total_pixels as f64 * spp as f64 / credit
         } else {
             0.0
         };

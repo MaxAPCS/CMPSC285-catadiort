@@ -4,6 +4,32 @@ use wide::{f32x4, f64x4, i32x4, u32x4};
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
 
+pub fn gaussian_weights(size: usize) -> Box<[f32]> {
+    if size == 0 {
+        return Box::new([1.]);
+    }
+
+    let center = size as f32 / 2.;
+    let sigma = size as f32 / 6.;
+    let neg_two_sig_sq_inv = -(2. * sigma * sigma).recip();
+
+    let mut weights = vec![0.; size * size].into_boxed_slice();
+    let mut sum = 0.0;
+    for y in 0..size {
+        for x in 0..size {
+            let (dx, dy) = (x as f32 - center, y as f32 - center);
+            let w = ((dx * dx + dy * dy) * neg_two_sig_sq_inv).exp();
+            weights[y * size + x] = w;
+            sum += w;
+        }
+    }
+    let inv_sum = sum.recip();
+    for w in weights.iter_mut() {
+        *w *= inv_sum;
+    }
+    weights
+}
+
 #[inline]
 pub fn transform_pointx4(mat: &Mat4, p: &Vec3x4) -> Vec3x4 {
     let mut out = Vec4x4::zero();
@@ -118,12 +144,12 @@ pub fn cast_m32(a: f64x4) -> f32x4 {
     ])
 }
 
-pub struct Chunku32x4<I: Iterator<Item = (u32, u32)>> {
+pub struct Chunku32x4<const COUNT: usize, I: Iterator<Item = [u32; COUNT]>> {
     i: I,
 }
 
-impl<I: Iterator<Item = (u32, u32)>> Iterator for Chunku32x4<I> {
-    type Item = (u32x4, u32x4);
+impl<const COUNT: usize, I: Iterator<Item = [u32; COUNT]>> Iterator for Chunku32x4<COUNT, I> {
+    type Item = [u32x4; COUNT];
 
     fn next(&mut self) -> Option<Self::Item> {
         let x = [
@@ -132,7 +158,7 @@ impl<I: Iterator<Item = (u32, u32)>> Iterator for Chunku32x4<I> {
             self.i.next()?,
             self.i.next()?,
         ];
-        Some((x.map(|e| e.0).into(), x.map(|e| e.1).into()))
+        Some(core::array::from_fn(|i| x.map(|e| e[i]).into()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -141,10 +167,13 @@ impl<I: Iterator<Item = (u32, u32)>> Iterator for Chunku32x4<I> {
     }
 }
 
-impl<I: Iterator<Item = (u32, u32)>> From<I> for Chunku32x4<I> {
+impl<const COUNT: usize, I: Iterator<Item = [u32; COUNT]>> From<I> for Chunku32x4<COUNT, I> {
     fn from(i: I) -> Self {
         Self { i }
     }
 }
 
-impl<I: ExactSizeIterator<Item = (u32, u32)>> ExactSizeIterator for Chunku32x4<I> {}
+impl<const COUNT: usize, I: Iterator<Item = [u32; COUNT]>> ExactSizeIterator
+    for Chunku32x4<COUNT, I>
+{
+}
