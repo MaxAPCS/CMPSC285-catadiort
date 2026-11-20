@@ -433,7 +433,6 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
             }
             "--max-depth" => o.max_depth = integer_at_least(a, value_of(args, &mut i, a), 0),
             "--threads" => o.threads = positive_int(a, value_of(args, &mut i, a)) as _,
-            "--no-accel" => o.no_accel = true,
             "--ambient" => {
                 let mut ambient = [0.; _];
                 for k in 0..3 {
@@ -472,14 +471,6 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
             "--exposure" => {
                 o.exposure = value_of(args, &mut i, a).parse::<f64>().unwrap_or(0.0) as f32;
                 o.exposure_set = true;
-            }
-            "--aov" => {
-                /* any name: the renderer knows which images it has and refuses
-                 * another, so a later homework can add one without a change here */
-                o.aov = value_of(args, &mut i, a).to_string();
-                if o.aov.is_empty() || o.aov.starts_with('-') {
-                    fail("--aov needs an image's name");
-                }
             }
             "--sampler" => {
                 let sampstr = value_of(args, &mut i, a).to_string();
@@ -555,9 +546,7 @@ fn read_options(args: &[String], tables: &[SceneTable]) -> Option<String> {
                 usage(tables);
                 std::process::exit(0);
             }
-            "--progress" => panic!(
-                "--progress is not supported— catadiort's parallel structure makes it impossible to tell when a certain pixel is done."
-            ),
+            "--progress" => o.progress = true,
             "--frames" => {
                 let v = value_of(args, &mut i, a);
                 let (first, last) = match v.split_once('-') {

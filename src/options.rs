@@ -113,7 +113,6 @@ pub struct Options {
     pub max_depth: i32, /* --max-depth N (0: no secondary rays); -1: the scene's rtMaxDepth */
     pub ambient: Option<[f32; 3]>, /* --ambient R G B: ka of the shading formula, overriding the scene's rtAmbient */
     pub threads: usize,            /* --threads N; 0: all cores */
-    pub no_accel: bool,            /* --no-accel: a linear scan over every primitive */
     pub time_limit: f64, /* --time-limit S: stop handing out tiles after S seconds of rendering and print the
                          LIMIT line (HW2 handout: timing); 0: render everything */
     pub out: String, /* --out PATH: write PATH.png (and .pfm); "": renders/<integrator>/<name> */
@@ -127,6 +126,7 @@ pub struct Options {
                      ao) and refuses another; "": the beauty image */
     pub trace_x: u32, /* --trace X Y: the pixel whose rays the renderer logs (debug.rs); -1: none */
     pub trace_y: u32,
+    pub progress: bool, /* --progress: a line on stderr every two seconds while rendering (timer.rs) */
     pub frame_first: i32, /* --frames A-B: render frames A to B of a movie only (the worlds since rtBegin,
                           from 0); -1: every frame */
     pub frame_last: i32,
@@ -158,7 +158,6 @@ impl Options {
             max_depth: -1,
             ambient: None,
             threads: 0,
-            no_accel: false,
             time_limit: 0.0,
             out: String::new(),
             pfm: false,
@@ -169,6 +168,7 @@ impl Options {
             aov: String::new(),
             trace_x: u32::MAX,
             trace_y: u32::MAX,
+            progress: false,
             frame_first: -1,
             frame_last: -1,
             lens: -1.0,

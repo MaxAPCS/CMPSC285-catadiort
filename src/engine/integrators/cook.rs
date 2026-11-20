@@ -65,46 +65,30 @@ impl Integrator for Cook {
             hit.norm = wider::copysign(hit.norm, -hit.wdir);
             let (norm, matr) = hit.shade(depth);
             hit.norm = wider::copysign(norm.normalized(), -hit.wdir);
+            // let wnormf = wider::copysign(hit.wnorm, -hit.wdir);
 
-            // Spawn Secondary Rays & Compute Transmitted Albedo
+            // // NEE: Cast Shadow Rays
+            // world.shadowrays(hit.wpos).filter_map(|sr| {});
+
+            // Spawn Secondary Rays & Compute Transmitted Albedo ( 1-k_t * 1-metal * k_d * 1-Emu_0 )
             let transalbedo = if matr.transmission == 0. {
                 // Opaque Surfaces
 
-                // Directional Absorbed-then-Reemitted Color
-                let albedo_from = {
-                    // BRDF Total Weight
-                    let 总数 = ggx_albedo::ggx_albedo_average(matr.roughness, matr.albedo);
-
-                    let mut denominv = Vec3::one() / (Vec3::one() - 总数);
-                    denominv.apply(|c| if !c.is_finite() { 0. } else { c.recip() });
-
-                    move |wdir: Vec3| {
-                        // Entrance Direction
-                        let 进方 = hit.norm.dot(hit.wdir);
-                        // Exit Direction
-                        let 出方 = hit.norm.dot(wdir).max(0.);
-                        // BRDF Entrance Weight
-                        let 进数 = ggx_albedo::ggx_albedo(matr.roughness, 进方, matr.albedo);
-                        // BRDF Exit Weight
-                        let 出数 = ggx_albedo::ggx_albedo(matr.roughness, 出方, matr.albedo);
-                        // BRDF Normalized "Unused" Weight
-                        let 省 = (Vec3::one() - 进数) * (Vec3::one() - 出数) * denominv;
-                        // Ray Direction Albedo
-                        matr.albedo * (1. - matr.metallic) * 省
-                    }
-                };
-
                 if matr.specs() {
-                    if matr.roughness == 0. {
-                        // Smooth Gloss
+                    // Coated
 
-                        // Calculate Reflection Weight
+                    if matr.roughness == 0. {
+                        // Smooth Conductor
+
+                        // Compute Reflection Weight
                         let flecwgh = matr.specular
                             + (Vec3::one() - matr.specular) * (1. - hit.norm.dot(hit.wdir)).powi(5);
                         // Reflection
-                        child(flecwgh, flecdirs[i])
+                        child(flecwgh, flecdirs[i]);
+
+                        (1. - matr.metallic) * matr.albedo * (Vec3::one() - flecwgh)
                     } else {
-                        // Rough Gloss
+                        // Rough Conductor
                         let smoothness =
                             ((matr.roughness * matr.roughness).recip() * 2. - 2.).max(1.);
 
@@ -112,28 +96,48 @@ impl Integrator for Cook {
                         let specflecdir = warp::recenter(
                             warp::sample_phong_lobe(specdirsuv[i], smoothness),
                             flecdirs[i],
-                        );
+                        )
+                        .normalized();
                         if specflecdir.dot(hit.norm) > 0. {
-                            // Calculate Specular Reflection Weight
+                            // Compute Specular Reflection Weight
                             let specflecwgh = matr.specular
                                 + (Vec3::one() - matr.specular)
-                                    * (1. - (hit.wdir + specflecdir).normalized().dot(hit.wdir))
-                                        .powi(5);
+                                    * (1. - ((hit.wdir + specflecdir) / 2.).dot(hit.wdir)).powi(5);
                             // Specular Reflection
                             child(specflecwgh, specflecdir)
                         }
-                    }
-                }
 
-                albedo_from(aodirs[i])
+                        // Entrance Direction
+                        let 进方 = hit.norm.dot(hit.wdir);
+                        // BRDF Entrance Weight
+                        let 进数 = ggx_albedo::ggx_albedo(matr.roughness, 进方, matr.albedo);
+                        // BRDF Total Weight
+                        let 总数 = ggx_albedo::ggx_albedo_average(matr.roughness, matr.albedo);
+
+                        let mut coat = Vec3::one() - 进数;
+                        let coatmut = coat.as_mut_array();
+                        let mask: [_; 3] = (Vec3::one() - 总数).into();
+                        for i in 0..3 {
+                            if mask[i] == 0. {
+                                coatmut[i] = 0.
+                            }
+                        }
+
+                        (1. - matr.metallic) * matr.albedo * coat
+                    }
+                } else {
+                    // Uncoated
+
+                    matr.albedo
+                }
             } else {
                 // Translucent Surfaces
 
-                // Calculate Reflection Weight & Refraction Direction
+                // Compute Reflection Weight & Refraction Direction
                 let entering = hit.wdir.dot(hit.wnorm) <= 0.;
                 let (flecwgh, fracdir) =
                     whitted::refraction(hit.wdir, hit.norm, matr.ior, entering);
-                // Calculate Refraction Weight
+                // Compute Refraction Weight
                 let tint =
                     Vec3::one() - (Vec3::broadcast(matr.albedo.component_max()) - matr.albedo);
                 let eta = if entering {
@@ -163,7 +167,8 @@ impl Integrator for Cook {
                         let specflecdir = warp::recenter(
                             warp::sample_phong_lobe(specdirsuv[i], smoothness),
                             flecdirs[i],
-                        );
+                        )
+                        .normalized();
                         if specflecdir.dot(hit.norm) > 0. {
                             // Specular Reflection
                             child(matr.specular * flecwgh, specflecdir)
@@ -174,7 +179,8 @@ impl Integrator for Cook {
                         let specfracdir = warp::recenter(
                             warp::sample_phong_lobe(specdirsuv[i], smoothness),
                             fracdir,
-                        );
+                        )
+                        .normalized();
                         if specfracdir.dot(hit.norm) <= 0. {
                             // Specular Refraction
                             child(matr.transmission * fracwgh, specfracdir)
@@ -182,11 +188,11 @@ impl Integrator for Cook {
                     }
                 }
 
-                (1. - matr.transmission) * matr.albedo
+                (1. - matr.transmission) * matr.albedo * (1. - flecwgh)
             };
 
-            // Compute Ambient Occlusion Color
-            let ambientcoeff = if AODIST > 0. && {
+            // Compute Ambient Occlusion Color (k_a * V_ao)
+            let ambientcolor = if AODIST > 0. && {
                 let mut ar = ray::ShadowRay::new(
                     hit.wpos + wider::copysign(hit.wnorm * RECAST_EPSILON, aodirs[i]),
                     aodirs[i],
@@ -205,8 +211,40 @@ impl Integrator for Cook {
             let emissioncoeff = 1.; // TODO
 
             // Compute Weighted Final Color
-            out[i] = wgh * (ambientcoeff * transalbedo + emissioncoeff * matr.emission)
+            out[i] = wgh * (ambientcolor * transalbedo + emissioncoeff * matr.emission)
         }
         ((*idxs, out), children)
     }
 }
+
+/* for nee
+
+                        let 出数 = matr.specular
+                            + (Vec3::one() - matr.specular)
+                                * (1. - hit.norm.dot(flecdirs[i])).powi(5);
+                        let 总数 = matr.specular + (Vec3::one() - matr.specular) / 21.;
+                        * (Vec3::one() - 出数) / (Vec3::one() - 总数)
+
+// Directional Absorbed-then-Reemitted Coat Weight
+let albedo_wgh = {
+    // BRDF Total Weight
+    let 总数 = ggx_albedo::ggx_albedo_average(matr.roughness, matr.albedo);
+
+    let mut denominv = Vec3::one() / (Vec3::one() - 总数);
+    denominv.apply(|c| if !c.is_finite() { 0. } else { c.recip() });
+
+    move |wdir: Vec3| {
+        // Entrance Direction
+        let 进方 = hit.norm.dot(hit.wdir);
+        // Exit Direction
+        let 出方 = hit.norm.dot(wdir).max(0.);
+        // BRDF Entrance Weight
+        let 进数 =
+            ggx_albedo::ggx_albedo(matr.roughness, 进方, matr.albedo);
+        // BRDF Exit Weight
+        let 出数 =
+            ggx_albedo::ggx_albedo(matr.roughness, 出方, matr.albedo);
+        // BRDF Normalized "Unused" Weight
+        (Vec3::one() - 进数) * (Vec3::one() - 出数) * denominv
+    }
+}; */

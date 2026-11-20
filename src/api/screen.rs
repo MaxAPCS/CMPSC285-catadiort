@@ -398,7 +398,10 @@ pub extern "C" fn rtWorldEnd() {
 
         let build_time = total.seconds();
         let render = Timer::new();
-        let budget = RenderBudget::new(o.time_limit); /* --time-limit: the clock starts here (timer.rs) */
+        let mut budget = RenderBudget::new(o.time_limit); /* --time-limit: the clock starts here (timer.rs) */
+        if o.progress {
+            budget.progress(s.res.0 as u64 * s.res.1 as u64); /* --progress: a line every two seconds */
+        }
 
         let step = RAY_CONCURRENCY / (res.0 * res.2 * res.2);
         for i in (0..res.1).step_by(step as usize) {
