@@ -27,6 +27,7 @@ pub(super) trait Primitive {
 
 pub(super) trait Light {
     fn rayto(&self, pos: Vec3) -> super::ray::ShadowRay;
+    // fn cos_angular_radius(&self, p: Vec3) -> f32;
 }
 
 pub enum MeshEmissive {

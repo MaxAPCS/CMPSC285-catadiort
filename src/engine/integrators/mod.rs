@@ -4,6 +4,8 @@ mod whitted;
 pub(crate) use cook::*;
 pub(crate) use whitted::*;
 
+use crate::utils::samplers;
+
 pub(super) const RECAST_EPSILON: f32 = 1e-4;
 
 pub(super) trait Integrator {
@@ -18,6 +20,14 @@ pub(super) trait Integrator {
         depth: u16,
     ) -> (
         ([u32; 4], [ultraviolet::Vec3; 4]),
-        smallvec::SmallVec<[(u32, ultraviolet::Vec3, ultraviolet::Vec3, ultraviolet::Vec3); 12]>,
+        smallvec::SmallVec<
+            [(
+                u32,
+                ultraviolet::Vec3,
+                ultraviolet::Vec3,
+                ultraviolet::Vec3,
+                samplers::AnySampler,
+            ); 8],
+        >,
     );
 }

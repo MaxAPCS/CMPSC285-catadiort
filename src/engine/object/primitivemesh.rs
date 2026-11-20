@@ -1,7 +1,7 @@
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::sync::Arc;
 use ultraviolet::{Mat4, Vec2, Vec2x4, Vec3, Vec3x4};
-use wide::{CmpGe, CmpLe, f32x4, f64x4, u32x4};
+use wide::{CmpGe, CmpLe, f32x4, f64x4};
 
 use super::Primitive;
 use crate::api::{RtCutoutFn, RtShadeContext};
@@ -228,7 +228,6 @@ impl Mesh {
                 out[i] = 0
             }
         }
-        let out: u32x4 = out.into();
         bytemuck::cast(out)
     }
 }

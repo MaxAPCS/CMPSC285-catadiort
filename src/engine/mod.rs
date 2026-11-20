@@ -49,58 +49,8 @@ impl RtMaterial {
     }
 
     #[inline]
-    const fn reflects(&self) -> bool {
-        const SQRT_0D15: f32 = 0.38729835;
-
-        self.transmission == 0.
-            && self.roughness < SQRT_0D15
-            && (self.specular.x > 0. || self.specular.y > 0. || self.specular.z > 0.)
-    }
-
-    #[inline]
-    const fn refracts(&self) -> bool {
-        self.transmission > 0.
-    }
-
-    #[inline]
-    const fn smoothness(&self) -> f32 {
-        const RECIP_0D15: f32 = 0.15f32.recip();
-
-        (1. - self.roughness * self.roughness * RECIP_0D15).max(0.)
-    }
-
-    #[inline]
-    const fn phongexponent(&self) -> u16 {
-        let alpha = (self.roughness * self.roughness).clamp(0.05, 1.);
-        (2. / (alpha * alpha) - 2.).max(1.) as _
-    }
-
-    /// Arguments:
-    /// - obj_wnorm: Object's Worldspace Normal, normalized
-    /// - ray_wdir: Ray's Worldspace Direction, normalized
-    fn color(
-        &self,
-        shadowrays: impl IntoIterator<Item = ray::ShadowRay>,
-        obj_norm: Vec3,
-        ray_wdir: Vec3,
-        ambient: Vec3,
-    ) -> Vec3 {
-        let phongexp = self.phongexponent() as i32;
-        let mut diffuse = Vec3::zero();
-        let mut specular = Vec3::zero();
-        for shadowray in shadowrays {
-            diffuse += shadowray.irradiance * obj_norm.dot(shadowray.dir).max(0.);
-            specular += shadowray.irradiance
-                * shadowray
-                    .dir
-                    .reflected(obj_norm)
-                    .dot(ray_wdir)
-                    .max(0.)
-                    .powi(phongexp)
-        }
-        (1. - self.transmission) * self.albedo * (ambient + diffuse / core::f32::consts::PI)
-            + self.specular * specular
-            + self.emission
+    const fn specs(&self) -> bool {
+        self.specular.x > 0. || self.specular.y > 0. || self.specular.z > 0.
     }
 }
 

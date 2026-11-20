@@ -3,12 +3,12 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
     ParallelIterator,
 };
-use rayon::slice::ParallelSlice;
+use rayon::slice::ParallelSliceMut;
 use ultraviolet::{Vec3, Vec3x4};
 use wide::f32x4;
 
 use super::{integrators::Integrator, ray, wider, world};
-use crate::utils::{samplers, warp};
+use crate::utils::{samplers::AnySamplerx4, warp};
 
 type RayBuf = Vec<([u32; 4], Vec3x4, ray::Rayx4)>;
 
@@ -27,7 +27,7 @@ impl Screen {
     /// - res: (width, height, sqrt(samples))
     /// - hslice: range of heights
     /// - seed: sampler pcg32 seed
-    pub fn create<S: samplers::Sampler>(
+    pub fn create(
         frame: Box<[Vec3]>,
         eyepos: Vec3,
         tofwd: Vec3,
@@ -37,6 +37,7 @@ impl Screen {
         lensrad: f32,
         res: (u32, u32, u32),
         hslice: Range<u32>,
+        sampler: crate::options::Sampler,
         seed: u64,
     ) -> Self {
         debug_assert!((res.0 * hslice.len() as u32 * res.2 * res.2) % 4 == 0);
@@ -63,8 +64,8 @@ impl Screen {
             .par_bridge()
             .map(|[i, j, ni, nj]| {
                 let n = nj * res.2 + ni;
-                let mut s = samplers::Samplerx4::<S>::pixel(i, j, n, (res.2 * res.2) as _, seed);
-                let film = s.next();
+                let mut rayspl = AnySamplerx4::pixel(i, j, n, (res.2 * res.2) as _, seed, sampler);
+                let film = rayspl.next2();
                 let x = (wider::cast_f32x4(i) + film.x) * wi;
                 let y = (wider::cast_f32x4(j) + film.y) * hi;
 
@@ -72,17 +73,19 @@ impl Screen {
                 let mut raydir =
                     (tofwd + (2. * x - 1.) * torgh + (1. - 2. * y) * totop).normalized();
 
-                let lens = warp::sample_concentric_diskx4(s.next());
+                let lens = warp::sample_concentric_diskx4(rayspl.next2());
                 if lensrad > 0. {
                     raysrc = eyepos + (torgh * lens.x + totop * lens.y) * f32x4::splat(lensrad);
                     let lensdst = eyepos + raydir * (focusdst / (raydir.dot(tofwd)));
                     raydir = (lensdst - raysrc).normalized();
                 }
 
+                let _time = rayspl.next1();
+
                 (
                     (j * res.0 + i).into(),
                     Vec3x4::broadcast(n.as_array_ref().map(|n| weights[n as usize]).into()),
-                    ray::Rayx4::new(raysrc, raydir),
+                    ray::Rayx4::new(raysrc, raydir, rayspl),
                 )
             })
             .collect(),
@@ -160,9 +163,25 @@ impl Screen {
         });
 
         // Serialize Children
-        let children: Vec<_> = children.into_par_iter().flatten_iter().collect();
-        let children = children.par_chunks_exact(4);
+        let mut children: Vec<_> = children.into_par_iter().flatten_iter().collect(); // fixme use accumx4 instead
+        let mut children = children.par_chunks_exact_mut(4);
         let rem = children.remainder();
+        let last = if !rem.is_empty() {
+            Some((
+                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.0)),
+                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.1)).into(),
+                ray::Rayx4::new(
+                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.2)).into(),
+                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.3)).into(),
+                    core::array::from_fn(|i| {
+                        rem.get_mut(i).map_or_default(|r| core::mem::take(&mut r.4))
+                    })
+                    .into(),
+                ),
+            ))
+        } else {
+            None
+        };
         *dst = children
             .map(|chunk| {
                 (
@@ -171,19 +190,13 @@ impl Screen {
                     ray::Rayx4::new(
                         core::array::from_fn(|i| chunk[i].2).into(),
                         core::array::from_fn(|i| chunk[i].3).into(),
+                        core::array::from_fn(|i| core::mem::take(&mut chunk[i].4)).into(),
                     ),
                 )
             })
             .collect();
-        if !rem.is_empty() {
-            dst.push((
-                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.0)),
-                core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.1)).into(),
-                ray::Rayx4::new(
-                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.2)).into(),
-                    core::array::from_fn(|i| rem.get(i).map_or_default(|r| r.3)).into(),
-                ),
-            ));
+        if let Some(last) = last {
+            dst.push(last);
         }
 
         // Finish Pass

@@ -8,6 +8,15 @@
 use ultraviolet::{Vec2, Vec2x4, Vec3, Vec3x4};
 use wide::{CmpEq, CmpGt, f32x4};
 
+#[inline]
+pub fn recenter(x: Vec3, center: Vec3) -> Vec3 {
+    x.rotated_by(center.geom(Vec3::unit_z()).scaled_by(0.5))
+}
+#[inline]
+pub fn recenterx4(x: Vec3x4, center: Vec3x4) -> Vec3x4 {
+    x.rotated_by(center.geom(Vec3x4::unit_z()).scaled_by(f32x4::HALF))
+}
+
 /// A point in the unit disk, (x, y, 0), by Shirley and Chiu's concentric
 /// map. Density 1 / pi over the disk's area.
 pub fn sample_concentric_disk(uv: Vec2) -> Vec3 {
@@ -54,6 +63,14 @@ pub fn sample_cosine_hemisphere(uv: Vec2) -> Vec3 {
     out.z = (1. - out.x * out.x - out.y * out.y).max(0.).sqrt();
     out
 }
+#[inline]
+pub fn sample_cosine_hemispherex4(uv: Vec2x4) -> Vec3x4 {
+    let mut out = sample_concentric_diskx4(uv);
+    out.z = (1. - out.x * out.x - out.y * out.y)
+        .fast_max(f32x4::ZERO)
+        .sqrt();
+    out
+}
 pub const fn cosine_hemisphere_pdf(cos_theta: f32) -> f32 {
     cos_theta.max(0.) * concentric_disk_pdf()
 }
@@ -64,6 +81,12 @@ fn archimedes(z: f32, phi: f32) -> Vec3 {
     let (s, c) = phi.sin_cos();
     Vec3::new(zs * c, zs * s, z)
 }
+// #[inline]
+// fn archimedesx4(z: f32x4, phi: f32x4) -> Vec3x4 {
+//     let zs = (1. - z * z).sqrt();
+//     let (s, c) = phi.sin_cos();
+//     Vec3x4::new(zs * c, zs * s, z)
+// }
 
 /// A direction uniform on the unit sphere. Density 1 / (4 pi).
 pub fn sample_uniform_sphere(uv: Vec2) -> Vec3 {
@@ -102,6 +125,12 @@ pub fn sample_phong_lobe(uv: Vec2, n: f32) -> Vec3 {
     let phi = 2. * core::f32::consts::PI * uv.y;
     archimedes(z, phi)
 }
+// #[inline]
+// pub fn sample_phong_lobex4(uv: Vec2x4, n: f32) -> Vec3x4 {
+//     let z = uv.x.powf((n + 1.).recip());
+//     let phi = 2. * f32x4::PI * uv.y;
+//     archimedesx4(z, phi)
+// }
 pub fn phong_lobe_pdf(cos_theta: f32, n: f32) -> f32 {
     cos_theta.powf(n) * (n + 1.) * core::f32::consts::FRAC_1_PI / 2.
 }
@@ -119,8 +148,8 @@ pub mod test {
     use std::io::{BufWriter, Write};
 
     use super::*;
-    use crate::options::Options;
-    use crate::utils::samplers::make_sampler;
+    use crate::{options::Options, utils::samplers::AnySampler};
+
     pub fn run_warp_test(o: &Options) -> i32 {
         let w = o.warp.as_str();
         let param = o.warp_param;
@@ -139,12 +168,11 @@ pub mod test {
             return 1;
         }
         let name = o.sampler.unwrap_or(crate::options::Sampler::Independent);
-        let mut sampler = make_sampler(name, o.warp_count, o.seed);
         let stdout = std::io::stdout();
         let mut out = BufWriter::with_capacity(1 << 16, stdout.lock());
         for i in 0..o.warp_count {
-            sampler.start_pixel_sample(0, 0, i as _);
-            let u = sampler.next_2d();
+            let mut sampler = AnySampler::pixel(0, 0, i as _, o.warp_count as _, o.seed, name);
+            let u = sampler.next2();
             let (p, pdf) = match w {
                 "disk" => (sample_concentric_disk(u), concentric_disk_pdf()),
                 "cosine_hemisphere" => {

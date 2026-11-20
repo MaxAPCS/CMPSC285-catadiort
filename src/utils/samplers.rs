@@ -1,116 +1,170 @@
-//! sampler.rs: your samplers (the "Samplers" handout; workflow steps 2, 4
-//! and 5). The interface at the top is given: keep its names, since the
-//! given warptest.rs calls make_sampler. Below it, write each sampler as
-//! a type that implements Sampler, built on the given hashing.rs, and
-//! make make_sampler return the one a name asks for.
-
 use ultraviolet::{Vec2, Vec2x4};
-use wide::u32x4;
+use wide::{f32x4, u32x4};
 
 use crate::utils::hashing::*;
 
-/// A pixel sample's random numbers, dimension by dimension, in the
-/// handout's order. Every value depends only on the pixel, the sample's
-/// index, the dimension and the seed, never on the thread.
-pub trait Sampler: Send {
-    fn make(spp: u16, seed: u64) -> Self
+trait Sampler: Send {
+    fn pixel(x: u32, y: u32, n: u32, spp: u16, seed: u64) -> Self
     where
         Self: Sized;
-
-    /// Start sample `index` of the pixel at (x, y), in the full frame's
-    /// coordinates: from here next_1d and next_2d give that sample's
-    /// dimensions in order.
-    fn start_pixel_sample(&mut self, x: i32, y: i32, index: u16);
-    #[allow(dead_code)] // a renderer may draw no 1D dimension (the time is extra credit)
-    fn next_1d(&mut self) -> f32;
-    /// Two sample values, each in [0, 1).
-    fn next_2d(&mut self) -> Vec2;
+    fn next1(&mut self) -> f32;
+    fn next2(&mut self) -> Vec2;
 }
 
-/// The sampler called `name` ("independent", "stratified", "halton",
-/// "sobol") for spp samples per pixel and the given seed.
-pub fn make_sampler(name: crate::options::Sampler, spp: i32, seed: u64) -> Box<dyn Sampler> {
-    let spp = spp as u16;
-    match name {
-        crate::options::Sampler::Center => Box::new(Center::make(spp, seed)),
-        crate::options::Sampler::Independent => Box::new(Independent::make(spp, seed)),
-        crate::options::Sampler::Stratified => Box::new(Stratified::make(spp, seed)),
-        crate::options::Sampler::Halton => Box::new(Halton::make(spp, seed)),
-        crate::options::Sampler::Sobol => Box::new(Sobol::make(spp, seed)),
-    }
-}
-
-pub struct Samplerx4<S: Sampler>([S; 4]);
-impl<S: Sampler> Samplerx4<S> {
-    pub fn pixel(x: u32x4, y: u32x4, n: u32x4, spp: u16, seed: u64) -> Self {
+#[derive(Clone, Default)]
+pub struct AnySamplerx4([AnySampler; 4]);
+impl AnySamplerx4 {
+    pub fn pixel(
+        x: u32x4,
+        y: u32x4,
+        n: u32x4,
+        spp: u16,
+        seed: u64,
+        sampler: crate::options::Sampler,
+    ) -> Self {
         let x = x.as_array_ref();
         let y = y.as_array_ref();
         let n = n.as_array_ref();
         Self(core::array::from_fn(|i| {
-            let mut s = S::make(spp, seed);
-            s.start_pixel_sample(x[i] as _, y[i] as _, n[i] as _);
-            s
+            AnySampler::pixel(x[i] as _, y[i] as _, n[i] as _, spp, seed, sampler)
         }))
     }
 
-    pub fn next(&mut self) -> Vec2x4 {
-        core::array::from_fn(|i| self.0[i].next_2d()).into()
+    #[inline]
+    pub fn next1(&mut self) -> f32x4 {
+        core::array::from_fn(|i| self.0[i].next1()).into()
+    }
+
+    #[inline]
+    pub fn next2(&mut self) -> Vec2x4 {
+        core::array::from_fn(|i| self.0[i].next2()).into()
+    }
+}
+impl Into<[AnySampler; 4]> for AnySamplerx4 {
+    fn into(self) -> [AnySampler; 4] {
+        self.0
+    }
+}
+impl From<[AnySampler; 4]> for AnySamplerx4 {
+    fn from(value: [AnySampler; 4]) -> Self {
+        Self(value)
     }
 }
 
+#[derive(Clone)]
+pub enum AnySampler {
+    Center(Center),
+    Independent(Independent),
+    Stratified(Stratified),
+    Halton(Halton),
+    Sobol(Sobol),
+}
+impl AnySampler {
+    #[inline]
+    pub(super) fn pixel(
+        x: u32,
+        y: u32,
+        n: u32,
+        spp: u16,
+        seed: u64,
+        sampler: crate::options::Sampler,
+    ) -> Self {
+        match sampler {
+            crate::options::Sampler::Center => Self::Center(Center::pixel(x, y, n, spp, seed)),
+            crate::options::Sampler::Independent => {
+                Self::Independent(Independent::pixel(x, y, n, spp, seed))
+            }
+            crate::options::Sampler::Stratified => {
+                Self::Stratified(Stratified::pixel(x, y, n, spp, seed))
+            }
+            crate::options::Sampler::Halton => Self::Halton(Halton::pixel(x, y, n, spp, seed)),
+            crate::options::Sampler::Sobol => Self::Sobol(Sobol::pixel(x, y, n, spp, seed)),
+        }
+    }
+
+    #[inline]
+    fn next1(&mut self) -> f32 {
+        match self {
+            Self::Center(inner) => inner.next1(),
+            Self::Independent(inner) => inner.next1(),
+            Self::Stratified(inner) => inner.next1(),
+            Self::Halton(inner) => inner.next1(),
+            Self::Sobol(inner) => inner.next1(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn next2(&mut self) -> Vec2 {
+        match self {
+            Self::Center(inner) => inner.next2(),
+            Self::Independent(inner) => inner.next2(),
+            Self::Stratified(inner) => inner.next2(),
+            Self::Halton(inner) => inner.next2(),
+            Self::Sobol(inner) => inner.next2(),
+        }
+    }
+}
+impl Default for AnySampler {
+    fn default() -> Self {
+        Self::Center(Center)
+    }
+}
+
+#[derive(Clone)]
 pub struct Center;
 impl Sampler for Center {
-    fn make(_: u16, _: u64) -> Self
+    #[inline]
+    fn pixel(_x: u32, _y: u32, _n: u32, _spp: u16, _seed: u64) -> Self
     where
         Self: Sized,
     {
         Self
     }
 
-    fn start_pixel_sample(&mut self, _: i32, _: i32, _: u16) {}
-
-    fn next_1d(&mut self) -> f32 {
+    #[inline]
+    fn next1(&mut self) -> f32 {
         0.5
     }
 
-    fn next_2d(&mut self) -> Vec2 {
+    #[inline]
+    fn next2(&mut self) -> Vec2 {
         Vec2::broadcast(0.5)
     }
 }
 
+#[derive(Clone)]
 pub struct Independent {
     rng: Pcg32,
     seed: u64,
 }
 impl Sampler for Independent {
-    fn make(_: u16, seed: u64) -> Self
+    fn pixel(x: u32, y: u32, n: u32, _spp: u16, seed: u64) -> Self
     where
         Self: Sized,
     {
-        Self {
+        let mut nself = Self {
             rng: Pcg32::new(),
             seed,
-        }
+        };
+        nself
+            .rng
+            .set_sequence(hash3(x as _, y as _, nself.seed), nself.seed);
+        nself.rng.advance((n as u64).wrapping_mul(65536));
+        nself
     }
 
     #[inline]
-    fn start_pixel_sample(&mut self, x: i32, y: i32, index: u16) {
-        self.rng
-            .set_sequence(hash3(x as _, y as _, self.seed), self.seed);
-        self.rng.advance((index as u64).wrapping_mul(65536));
-    }
-
-    #[inline]
-    fn next_1d(&mut self) -> f32 {
+    fn next1(&mut self) -> f32 {
         self.rng.uniform()
     }
 
     #[inline]
-    fn next_2d(&mut self) -> Vec2 {
+    fn next2(&mut self) -> Vec2 {
         Vec2::new(self.rng.uniform(), self.rng.uniform())
     }
 }
 
+#[derive(Clone)]
 pub struct Stratified {
     rng: Pcg32,
     seed: u64,
@@ -121,7 +175,7 @@ pub struct Stratified {
     dimension: i32,
 }
 impl Sampler for Stratified {
-    fn make(spp: u16, seed: u64) -> Self
+    fn pixel(x: u32, y: u32, n: u32, spp: u16, seed: u64) -> Self
     where
         Self: Sized,
     {
@@ -133,29 +187,22 @@ impl Sampler for Stratified {
             }
         }
         debug_assert_eq!(factor * (spp / factor), spp);
-
-        Self {
+        let mut nself = Self {
             rng: Pcg32::new(),
             seed,
 
             strata: (factor, (spp / factor)),
-            index: 0,
-            hash: 0,
+            index: n as _,
+            hash: hash3(x as _, y as _, seed),
             dimension: 0,
-        }
+        };
+        nself.rng.set_sequence(nself.hash, nself.seed);
+        nself.rng.advance((n as u64).wrapping_mul(65536));
+        nself
     }
 
     #[inline]
-    fn start_pixel_sample(&mut self, x: i32, y: i32, index: u16) {
-        self.index = index as _;
-        self.hash = hash3(x as _, y as _, self.seed);
-        self.dimension = 0;
-        self.rng.set_sequence(self.hash, self.seed);
-        self.rng.advance((index as u64).wrapping_mul(65536));
-    }
-
-    #[inline]
-    fn next_1d(&mut self) -> f32 {
+    fn next1(&mut self) -> f32 {
         let key = low32(hash_dimension(self.hash, self.dimension));
         let p = permutation_element(self.index as _, self.spp(), key) as f32;
         self.dimension += 1;
@@ -163,7 +210,7 @@ impl Sampler for Stratified {
     }
 
     #[inline]
-    fn next_2d(&mut self) -> Vec2 {
+    fn next2(&mut self) -> Vec2 {
         let key = low32(hash_dimension(self.hash, self.dimension));
         let p = permutation_element(self.index as _, self.spp(), key);
         self.dimension += 2;
@@ -181,6 +228,7 @@ impl Stratified {
     }
 }
 
+#[derive(Clone)]
 pub struct Halton {
     rng: Pcg32,
     seed: u64,
@@ -190,36 +238,33 @@ pub struct Halton {
     dimension: i32,
 }
 impl Sampler for Halton {
-    fn make(_: u16, seed: u64) -> Self
+    fn pixel(x: u32, y: u32, n: u32, _spp: u16, seed: u64) -> Self
     where
         Self: Sized,
     {
-        Self {
+        let mut nself = Self {
             rng: Pcg32::new(),
             seed,
 
-            index: 0,
-            hash: 0,
+            index: n as _,
+            hash: hash3(x as _, y as _, seed),
             dimension: 0,
-        }
+        };
+        nself.rng.set_sequence(nself.hash, nself.seed);
+        nself.rng.advance((n as u64).wrapping_mul(65536));
+        nself
     }
 
-    fn start_pixel_sample(&mut self, x: i32, y: i32, index: u16) {
-        self.index = index;
-        self.hash = hash3(x as _, y as _, self.seed);
-        self.dimension = 0;
-        self.rng.set_sequence(self.hash, self.seed);
-        self.rng.advance((index as u64).wrapping_mul(65536));
-    }
-
-    fn next_1d(&mut self) -> f32 {
+    #[inline]
+    fn next1(&mut self) -> f32 {
         let dim = self.dim();
         self.dimension += 1;
         dim
     }
 
-    fn next_2d(&mut self) -> Vec2 {
-        Vec2::new(self.next_1d(), self.next_1d())
+    #[inline]
+    fn next2(&mut self) -> Vec2 {
+        Vec2::new(self.next1(), self.next1())
     }
 }
 impl Halton {
@@ -237,6 +282,7 @@ impl Halton {
     }
 }
 
+#[derive(Clone)]
 pub struct Sobol {
     rng: Pcg32,
     seed: u64,
@@ -246,35 +292,32 @@ pub struct Sobol {
     dimension: i32,
 }
 impl Sampler for Sobol {
-    fn make(_: u16, seed: u64) -> Self
+    fn pixel(x: u32, y: u32, n: u32, _spp: u16, seed: u64) -> Self
     where
         Self: Sized,
     {
-        Self {
+        let mut nself = Self {
             rng: Pcg32::new(),
             seed,
 
-            index: 0,
-            hash: 0,
+            index: n as _,
+            hash: hash3(x as _, y as _, seed),
             dimension: 0,
-        }
+        };
+        nself.rng.set_sequence(nself.hash, nself.seed);
+        nself.rng.advance((n as u64).wrapping_mul(65536));
+        nself
     }
 
-    fn start_pixel_sample(&mut self, x: i32, y: i32, index: u16) {
-        self.index = index;
-        self.hash = hash3(x as _, y as _, self.seed);
-        self.dimension = 0;
-        self.rng.set_sequence(self.hash, self.seed);
-        self.rng.advance((index as u64).wrapping_mul(65536));
-    }
-
-    fn next_1d(&mut self) -> f32 {
+    #[inline]
+    fn next1(&mut self) -> f32 {
         let dim = self.dim();
         self.dimension += 1;
         dim.x
     }
 
-    fn next_2d(&mut self) -> Vec2 {
+    #[inline]
+    fn next2(&mut self) -> Vec2 {
         let dim = self.dim();
         self.dimension += 2;
         dim
@@ -298,14 +341,21 @@ mod test {
 
     #[test]
     fn test_sobol() {
-        let mut sobol = Sobol::make(0, 0);
-        sobol.start_pixel_sample(0, 0, 0);
-        assert_eq!(sobol.next_2d(), Vec2::new(0.182183221, 0.827739835));
-        sobol.start_pixel_sample(0, 0, 1);
-        assert_eq!(sobol.next_2d(), Vec2::new(0.834863305, 0.179580197));
-        sobol.start_pixel_sample(0, 0, 2);
-        assert_eq!(sobol.next_2d(), Vec2::new(0.556520045, 0.618239522));
-        sobol.start_pixel_sample(0, 0, 3);
-        assert_eq!(sobol.next_2d(), Vec2::new(0.357120842, 0.266228676));
+        assert_eq!(
+            Sobol::pixel(0, 0, 0, 0, 0).next2(),
+            Vec2::new(0.182183221, 0.827739835)
+        );
+        assert_eq!(
+            Sobol::pixel(0, 0, 1, 0, 0).next2(),
+            Vec2::new(0.834863305, 0.179580197)
+        );
+        assert_eq!(
+            Sobol::pixel(0, 0, 2, 0, 0).next2(),
+            Vec2::new(0.556520045, 0.618239522)
+        );
+        assert_eq!(
+            Sobol::pixel(0, 0, 3, 0, 0).next2(),
+            Vec2::new(0.357120842, 0.266228676)
+        );
     }
 }

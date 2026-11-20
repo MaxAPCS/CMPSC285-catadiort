@@ -5,7 +5,7 @@ use wide::{CmpLe, f32x4, u32x4};
 use super::{Material, wider};
 use crate::{
     api::{RtMaterial, RtShadeContext},
-    engine::MEDIUM_IOR,
+    utils::samplers::AnySamplerx4,
 };
 
 const DEPTH_COMPLEXITY: usize = 2;
@@ -18,16 +18,19 @@ pub(super) struct Rayx4 {
     /// Furthest hit
     pub max_t: f32x4,
 
+    pub sampler: AnySamplerx4,
+
     pub hits: smallvec::SmallVec<[Hitx4; DEPTH_COMPLEXITY]>, // only for PrimitiveMesh
 }
 
 impl Rayx4 {
     #[inline]
-    pub const fn new(pos: Vec3x4, dir: Vec3x4) -> Self {
+    pub const fn new(pos: Vec3x4, dir: Vec3x4, sampler: AnySamplerx4) -> Self {
         Self {
             pos,
             dir,
             max_t: f32x4::new([f32::INFINITY; _]),
+            sampler,
             hits: smallvec::SmallVec::new_const(),
         }
     }
@@ -38,6 +41,7 @@ impl Rayx4 {
             pos: wider::transform_pointx4(trans, &self.pos),
             dir: wider::transform_vecx4(trans, self.dir),
             max_t: self.max_t,
+            sampler: self.sampler.clone(),
             hits: smallvec::SmallVec::new_const(),
         }
     }
@@ -104,8 +108,7 @@ pub(super) struct Hitx4 {
 }
 
 impl Hitx4 {
-    // pub(super) to give access to primitivemesh
-    pub(super) fn collapse(&mut self, mut other: Self) {
+    fn collapse(&mut self, mut other: Self) {
         let me = (!self.t.is_nan()) & (other.t.is_nan() | self.t.cmp_le(other.t));
 
         self.opos = Vec3x4::blend(me, self.opos, other.opos);
@@ -128,6 +131,11 @@ impl Hitx4 {
                 core::mem::swap(&mut self.material[i], &mut other.material[i]);
             }
         }
+    }
+
+    #[inline]
+    pub fn reflect(&self) -> Vec3x4 {
+        self.wdir.reflected(self.norm)
     }
 }
 
@@ -187,64 +195,8 @@ impl Hit {
     pub fn reflect(&self) -> Vec3 {
         self.wdir.reflected(self.norm)
     }
-
-    pub fn refract(&self, ior: f32) -> (f32, Vec3) {
-        let wscale = self.wdir.mag();
-        let (fresnel, refractdir) = refraction(
-            self.wdir / wscale,
-            self.norm,
-            ior,
-            self.wdir.dot(self.wnorm) <= 0.,
-        );
-        (fresnel, refractdir * wscale)
-    }
 }
 
-/// Arguments:
-/// - dir: normalized, towards surface
-/// - norm: normalized, away from object center
-/// - object_ior: index of refraction of object
-/// Returns:
-/// - fresnel: reflection ray weight
-/// - refractdir: NaN if TIR, normalized
-#[inline]
-fn refraction(dir: Vec3, norm: Vec3, object_ior: f32, entering: bool) -> (f32, Vec3) {
-    if object_ior == MEDIUM_IOR {
-        return (0., dir);
-    }
-    let ndi = norm.dot(dir);
-    let eta = if entering {
-        MEDIUM_IOR / object_ior
-    } else {
-        object_ior / MEDIUM_IOR
-    };
-    let k = 1.0 - eta * eta * (1.0 - ndi * ndi);
-    let sqrtk = k.sqrt();
-    (
-        if k < 0. {
-            1. // TIR
-        } else {
-            fresnel(-ndi, object_ior)
-        },
-        dir.mul_add(Vec3::broadcast(eta), -(eta * ndi + sqrtk) * norm),
-    )
-}
-
-/// Arguments:
-/// - medium_cos: cosine between incident and medium-facing normal
-/// - object_ior: index of refraction of object
-/// Returns:
-/// - fresnel: reflection ray weight
-#[inline]
-const fn fresnel(medium_cos: f32, object_ior: f32) -> f32 {
-    let f0 = (object_ior - MEDIUM_IOR) / (object_ior + MEDIUM_IOR);
-    let f0 = f0 * f0;
-    let t = 1. - medium_cos;
-    let t2 = t * t;
-    f0 + (1. - f0) * t2 * t2 * t
-}
-
-/// No-clone
 impl Into<[Hit; 4]> for Hitx4 {
     fn into(self) -> [Hit; 4] {
         let opos: [Vec3; 4] = self.opos.into();
@@ -331,6 +283,7 @@ impl ShadowRay {
         for hit in core::mem::take(&mut self.hits) {
             let material = material!(hit.material);
             if material.prop.emits() {
+                // fixme bandaid
                 continue;
             }
             self.irradiance *= material.prop.albedo * material.prop.transmission;

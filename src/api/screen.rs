@@ -13,7 +13,7 @@ use crate::utils::{
     texture,
     timer::{RenderBudget, Timer},
 };
-use crate::{AOV, options::Sampler, utils::samplers};
+use crate::{AOV, options::Sampler};
 
 /// Maximum Concurrent Rays
 const RAY_CONCURRENCY: u32 = 2u32.pow(22);
@@ -405,68 +405,19 @@ pub extern "C" fn rtWorldEnd() {
             let hslice = i..((i + step) as u32).min(res.1);
             let pixels = hslice.len() as u64 * (res.0 as u64);
 
-            let mut screen = match s.sampler {
-                Sampler::Center => Screen::create::<samplers::Center>(
-                    frame,
-                    s.eye,
-                    tofwd,
-                    totop,
-                    torgh,
-                    s.focus_distance,
-                    s.lens_radius,
-                    res,
-                    hslice,
-                    seed,
-                ),
-                Sampler::Independent => Screen::create::<samplers::Independent>(
-                    frame,
-                    s.eye,
-                    tofwd,
-                    totop,
-                    torgh,
-                    s.focus_distance,
-                    s.lens_radius,
-                    res,
-                    hslice,
-                    seed,
-                ),
-                Sampler::Stratified => Screen::create::<samplers::Stratified>(
-                    frame,
-                    s.eye,
-                    tofwd,
-                    totop,
-                    torgh,
-                    s.focus_distance,
-                    s.lens_radius,
-                    res,
-                    hslice,
-                    seed,
-                ),
-                Sampler::Halton => Screen::create::<samplers::Halton>(
-                    frame,
-                    s.eye,
-                    tofwd,
-                    totop,
-                    torgh,
-                    s.focus_distance,
-                    s.lens_radius,
-                    res,
-                    hslice,
-                    seed,
-                ),
-                Sampler::Sobol => Screen::create::<samplers::Sobol>(
-                    frame,
-                    s.eye,
-                    tofwd,
-                    totop,
-                    torgh,
-                    s.focus_distance,
-                    s.lens_radius,
-                    res,
-                    hslice,
-                    seed,
-                ),
-            };
+            let mut screen = Screen::create(
+                frame,
+                s.eye,
+                tofwd,
+                totop,
+                torgh,
+                s.focus_distance,
+                s.lens_radius,
+                res,
+                hslice,
+                s.sampler,
+                seed,
+            );
 
             match o.integrator {
                 Integrator::Whitted => screen.process::<integrators::Whitted>(&world, s.max_depth),
