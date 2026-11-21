@@ -58,7 +58,7 @@ SCENE = "Convergence"
 REF_KIT = "reference_renders/2_Cook/1_TestScenes/Convergence_ref"
 REF_MADE = "renders/2_Cook/1_TestScenes/Convergence_ref"
 REF_SPP = 16384
-SAMPLERS = ["independent", "stratified", "halton"]
+SAMPLERS = ["independent", "stratified", "halton", "sobol"]
 SPPS = [1, 4, 16, 64, 256, 1024]
 GALLERY_SPP = 4
 

@@ -69,7 +69,7 @@ impl Light for MeshLight {
         if !self.cutout(&hit, u16::MAX) {
             return ray::ShadowRay::empty();
         }
-        let (_, matr) = hit.shade(0); // todo use source depth + 1
+        let (_, matr) = hit.shade(1); // todo use source depth + 1
 
         let density_inv = (ta * incidence) / odst2;
         ray::ShadowRay::new(hit.wpos, hit.wdir, odst, matr.emission * density_inv)

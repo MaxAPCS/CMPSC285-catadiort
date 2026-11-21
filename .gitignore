@@ -1,6 +1,8 @@
 target/
 Cargo.lock
+README_HW3.md
 
+tools/__pycache__
 renders/
 reference_renders/
 timing/
