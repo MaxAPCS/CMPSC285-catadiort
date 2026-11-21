@@ -133,10 +133,10 @@ impl Hitx4 {
         }
     }
 
-    #[inline]
-    pub fn reflect(&self) -> Vec3x4 {
-        self.wdir.reflected(self.norm)
-    }
+    // #[inline]
+    // pub fn reflect(&self) -> Vec3x4 {
+    //     self.wdir.reflected(self.norm)
+    // }
 }
 
 #[derive(Default)]
@@ -261,7 +261,7 @@ pub(super) struct ShadowRay {
     pub dir: Vec3,
     /// Maximum Hit Time (exclusive)
     pub max_t: f32,
-
+    /// ( N_j * L_jk * S_jk * p_jk )
     pub irradiance: Vec3,
     pub hits: smallvec::SmallVec<[Hit; DEPTH_COMPLEXITY]>,
 }
@@ -279,13 +279,20 @@ impl ShadowRay {
     }
 
     #[inline]
+    pub const fn empty() -> Self {
+        Self {
+            pos: Vec3::broadcast(f32::NAN),
+            dir: Vec3::broadcast(f32::NAN),
+            max_t: f32::NAN,
+            irradiance: Vec3::broadcast(0.),
+            hits: smallvec::SmallVec::new_const(),
+        }
+    }
+
+    #[inline]
     pub fn collapse(&mut self) {
         for hit in core::mem::take(&mut self.hits) {
             let material = material!(hit.material);
-            if material.prop.emits() {
-                // fixme bandaid
-                continue;
-            }
             self.irradiance *= material.prop.albedo * material.prop.transmission;
             if self.obstructed() {
                 break;

@@ -4,11 +4,13 @@ use super::{Integrator, RECAST_EPSILON};
 use crate::engine::{MEDIUM_IOR, World, ray, wider};
 use crate::utils::samplers;
 
+#[derive(Clone, Copy)]
 pub struct Whitted;
 
 impl Integrator for Whitted {
     #[inline]
     fn integrate(
+        &self,
         world: &World,
         idxs: &[u32; 4],
         wghs: Vec3x4,
@@ -51,10 +53,11 @@ impl Integrator for Whitted {
             let mut diffuse = Vec3::zero();
             let mut specular = Vec3::zero();
             let shadowrays = world.shadowrays(hit.wpos).filter_map(|mut sr| {
-                if sr.dir.dot(hit.norm) <= 0.0 || sr.obstructed() {
+                if sr.obstructed() || hit.norm.dot(sr.dir) <= 0.0 {
                     return None;
                 }
                 sr.pos += wider::copysign(hit.wnorm * RECAST_EPSILON, sr.dir);
+                sr.max_t -= RECAST_EPSILON;
                 world.obstruct(&mut sr, u16::MAX);
                 if sr.obstructed() { None } else { Some(sr) }
             });
@@ -92,7 +95,6 @@ impl Integrator for Whitted {
 
             // Refract
             if matr.transmission > 0. {
-                debug_assert!(hit.wdir.mag() == 1.);
                 let (fresnel, refractdir) =
                     refraction(hit.wdir, hit.norm, matr.ior, hit.wdir.dot(hit.wnorm) <= 0.);
                 let reflectdir = hit.reflect();
@@ -154,7 +156,7 @@ pub(super) fn refraction(dir: Vec3, norm: Vec3, object_ior: f32, entering: bool)
 /// Returns:
 /// - fresnel: reflection ray weight
 #[inline]
-const fn fresnel(medium_cos: f32, object_ior: f32) -> f32 {
+pub(super) const fn fresnel(medium_cos: f32, object_ior: f32) -> f32 {
     let f0 = (object_ior - MEDIUM_IOR) / (object_ior + MEDIUM_IOR);
     let f0 = f0 * f0;
     let t = 1. - medium_cos;

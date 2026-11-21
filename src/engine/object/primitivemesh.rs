@@ -109,10 +109,10 @@ impl Primitive for Mesh {
     #[inline]
     fn centroid(&self) -> Vec3 {
         #[cfg(not(feature = "bvh"))]
-        let centroid = Self::tricentroid(&self.tris);
+        let ocenter = Self::tricentroid(&self.tris);
         #[cfg(feature = "bvh")]
-        let centroid = self.tris.centroid();
-        self.wotrans.inversed().transform_point3(centroid)
+        let ocenter = self.tris.centroid();
+        self.wotrans.inversed().transform_point3(ocenter)
     }
 
     fn obstruct(&self, ray: &mut ray::ShadowRay, depth: u16) {
@@ -279,6 +279,22 @@ impl Mesh {
         numer / denom
     }
 
+    pub fn triextent(triangles: &[Tri], center: Vec3) -> f32 {
+        triangles
+            .par_iter()
+            .fold(
+                || f32::NEG_INFINITY,
+                |mut extsq, tri| {
+                    for v in tri.oposs() {
+                        extsq = extsq.max((center - v).mag_sq());
+                    }
+                    extsq
+                },
+            )
+            .reduce(|| f32::NEG_INFINITY, f32::max)
+            .sqrt()
+    }
+
     #[inline]
     pub(in crate::engine) fn create(
         meshref: MeshReference,
@@ -299,6 +315,7 @@ impl Mesh {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Tri {
     o: Vec3,
     e1: Vec3,
@@ -336,13 +353,7 @@ impl Primitive for Tri {
 
     #[inline]
     fn centroid(&self) -> Vec3 {
-        unsafe {
-            self.oposs()
-                .into_iter()
-                .reduce(|a, b| a + b)
-                .unwrap_unchecked()
-                / 3.
-        }
+        self.o + (self.e1 + self.e2) / 3.
     }
 
     fn obstruct(&self, ray: &mut ray::ShadowRay, _: u16) {
@@ -371,17 +382,7 @@ impl Primitive for Tri {
             return;
         }
 
-        ray.hits.push(ray::Hit {
-            opos: Vec3::broadcast(f32::NAN),
-            wpos: ray.pos + ray.dir * t,
-            wdir: ray.dir,
-            wnorm: self.onorm,
-            t,
-            norm: self.norm((u, v)).unwrap_or(self.onorm),
-            uv: self.uv((u, v)),
-            color: self.color((u, v)).unwrap_or(Vec3::broadcast(f32::NAN)),
-            material: None,
-        })
+        ray.hits.push(self.hit(ray.pos, ray.dir, t, (u, v)))
     }
 
     fn intersect(&self, ray: &mut ray::Rayx4, _: u16) {
@@ -444,8 +445,28 @@ impl Tri {
     }
 
     #[inline]
-    pub fn operp(&self) -> Vec3 {
+    pub(super) fn operp(&self) -> Vec3 {
         Vec3::cross(&self.e1, self.e2)
+    }
+
+    #[inline]
+    pub(super) fn pos(&self, bc: Vec3) -> Vec3 {
+        self.o + self.e1 * bc.y + self.e2 * bc.z
+    }
+
+    #[inline]
+    pub(super) fn hit(&self, pos: Vec3, dir: Vec3, t: f32, bc: (f32, f32)) -> ray::Hit {
+        ray::Hit {
+            opos: Vec3::broadcast(f32::NAN),
+            wpos: pos + dir * t,
+            wdir: dir,
+            wnorm: self.onorm,
+            t,
+            norm: self.norm(bc).unwrap_or(self.onorm),
+            uv: self.uv(bc),
+            color: self.color(bc).unwrap_or(Vec3::broadcast(f32::NAN)),
+            material: None,
+        }
     }
 
     #[inline]

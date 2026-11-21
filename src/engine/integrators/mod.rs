@@ -8,11 +8,12 @@ use crate::utils::samplers;
 
 pub(super) const RECAST_EPSILON: f32 = 1e-4;
 
-pub(super) trait Integrator {
+pub(super) trait Integrator: Copy + Sync + Send {
     /// Returns:
     ///  - contribs: (indexes, colors)
     ///  - children: [(index, weight, pos, dir)]
     fn integrate(
+        &self,
         world: &super::world::World,
         idxs: &[u32; 4],
         wghs: ultraviolet::Vec3x4,

@@ -4,6 +4,7 @@ use wide::{f32x4, f64x4, i32x4, u32x4};
 #[allow(non_upper_case_globals)]
 pub const f32x4_NAN: f32x4 = f32x4::new([f32::NAN; _]);
 
+#[cfg(feature = "gaussian_weights")]
 pub fn gaussian_weights(size: usize) -> Box<[f32]> {
     if size == 0 {
         return Box::new([1.]);

@@ -316,8 +316,8 @@ pub unsafe extern "C" fn rtSampler(name: *const c_char) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rtAmbientOcclusion(max_distance: RtFloat) {
-    state().ao_distance = max_distance.max(0.0);
+pub extern "C" fn rtAmbientOcclusion(ao_distance: RtFloat) {
+    state().ao_distance = ao_distance.max(0.0);
 }
 
 /// # Safety
@@ -374,6 +374,7 @@ pub extern "C" fn rtWorldEnd() {
     if o.lens >= 0. {
         s.lens_radius = o.lens;
     }
+    let lightsamples = o.light_samples as _;
     let seed = o.seed;
 
     let total = Timer::new();
@@ -409,6 +410,7 @@ pub extern "C" fn rtWorldEnd() {
             let pixels = hslice.len() as u64 * (res.0 as u64);
 
             let mut screen = Screen::create(
+                s.sampler,
                 frame,
                 s.eye,
                 tofwd,
@@ -418,13 +420,19 @@ pub extern "C" fn rtWorldEnd() {
                 s.lens_radius,
                 res,
                 hslice,
-                s.sampler,
                 seed,
             );
 
             match o.integrator {
-                Integrator::Whitted => screen.process::<integrators::Whitted>(&world, s.max_depth),
-                Integrator::Cook => screen.process::<integrators::Cook>(&world, s.max_depth),
+                Integrator::Whitted => screen.process(integrators::Whitted, &world, s.max_depth),
+                Integrator::Cook => screen.process(
+                    integrators::Cook {
+                        ao_distance: s.ao_distance,
+                        lightsamples,
+                    },
+                    &world,
+                    s.max_depth,
+                ),
                 _ => unimplemented!(),
             };
 

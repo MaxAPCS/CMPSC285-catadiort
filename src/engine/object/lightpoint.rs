@@ -1,16 +1,16 @@
-use ultraviolet::Vec3;
+use ultraviolet::{Vec2, Vec3};
 
-use super::{Light, Primitive, Sphere};
-use crate::{api::RtMaterial, engine::ray::ShadowRay};
+use super::Light;
+use crate::engine::ray::ShadowRay;
 
 pub struct PointLight {
     pub pos: Vec3,
     pub intensity: Vec3,
-    radius: f32,
+    pub(super) radius: f32,
 }
 
 impl Light for PointLight {
-    fn rayto(&self, pos: Vec3) -> ShadowRay {
+    fn rayto(&self, pos: Vec3, _: Vec2) -> ShadowRay {
         let dir = self.pos - pos;
         let dst_sq = dir.mag_sq();
         let dst = dst_sq.sqrt();
@@ -25,20 +25,5 @@ impl PointLight {
             intensity,
             radius: 0.,
         }
-    }
-
-    pub fn from_emissive(o: &Sphere, material: &RtMaterial) -> Option<Self> {
-        if material.emission == Vec3::zero() {
-            return None;
-        }
-
-        let scale = o.extract_avg_scale();
-        let intensity = scale * scale * core::f32::consts::PI * material.emission;
-
-        Some(Self {
-            pos: o.centroid(),
-            intensity,
-            radius: scale.sqrt(),
-        })
     }
 }

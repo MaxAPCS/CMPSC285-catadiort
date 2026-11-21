@@ -1,23 +1,22 @@
 #[cfg(feature = "bvh")]
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::sync::Arc;
-use ultraviolet::{Mat4, Rotor3, Rotor3x4, Vec3, Vec3x4, Vec4, Vec4x4};
+use ultraviolet::{Mat4, Rotor3, Rotor3x4, Vec2, Vec3, Vec3x4, Vec4, Vec4x4};
 use wide::f32x4;
 
 #[cfg(feature = "bvh")]
 use super::bvh::BVH;
-use super::{
-    Light, Material, MeshEmissive, PointLight, Primitive, Sphere, from_emissive, object, ray,
-};
+use super::{Light, Material, Primitive, object, ray};
 use crate::api::RtCutoutFn;
-use crate::utils::texture;
+use crate::utils::{self, samplers, texture};
 
 pub(crate) const MEDIUM_IOR: f32 = 1.0;
 
 pub(crate) struct World {
     pub directionallights: Vec<object::DirectionalLight>,
-    planelights: Vec<object::PlaneLight>,
+    meshlights: Vec<Option<object::MeshEmissive>>,
     pub pointlights: Vec<object::PointLight>,
+    spherelights: Vec<object::SphereLight>,
     pub spotlights: Vec<object::SpotLight>,
 
     #[cfg(not(feature = "bvh"))]
@@ -45,8 +44,9 @@ impl World {
     pub const fn empty() -> Self {
         Self {
             directionallights: Vec::new(),
-            planelights: Vec::new(),
+            meshlights: Vec::new(),
             pointlights: Vec::new(),
+            spherelights: Vec::new(),
             spotlights: Vec::new(),
 
             #[cfg(not(feature = "bvh"))]
@@ -82,10 +82,9 @@ impl World {
         cutoutparams: Option<Arc<[u8]>>,
         material: Arc<Material>,
     ) {
-        let prop = material.prop;
-        let obj = Sphere::create(owtrans, cutout, cutoutparams, material);
-        if let Some(pl) = PointLight::from_emissive(&obj, &prop) {
-            self.pointlights.push(pl);
+        let obj = object::Sphere::create(owtrans, cutout, cutoutparams, material);
+        if let Some(sl) = object::SphereLight::from_emissive(&obj) {
+            self.spherelights.push(sl);
         }
         self.spheres.push(obj);
     }
@@ -99,19 +98,22 @@ impl World {
         material: Arc<Material>,
         triangles: Box<[object::Tri]>,
     ) {
-        match from_emissive(&triangles, owtrans, &material.prop) {
-            Some(MeshEmissive::Plane(pl)) => self.planelights.push(pl),
-            Some(MeshEmissive::Point(pl)) => self.pointlights.push(pl),
-            None => {}
-        }
-        self.meshtris.push((hash, triangles));
-        self.meshinstances.push(object::MeshReference {
+        let prop = material.prop;
+        let meshref = object::MeshReference {
             owtrans,
             cutout,
             cutoutparams,
             material,
-            triref: self.meshtris.len() - 1,
-        });
+            triref: self.meshtris.len(),
+        };
+        self.meshlights.push(object::from_emissive(
+            &triangles,
+            owtrans,
+            &prop,
+            object::MeshLight::emissive_create(&triangles, &meshref),
+        ));
+        self.meshinstances.push(meshref);
+        self.meshtris.push((hash, triangles));
     }
 
     pub fn mesh_instance(
@@ -125,18 +127,24 @@ impl World {
         let Some(triref) = self.meshtris.iter().position(|mt| mt.0 == hash) else {
             return false;
         };
-        match from_emissive(&self.meshtris[triref].1, owtrans, &material.prop) {
-            Some(MeshEmissive::Plane(pl)) => self.planelights.push(pl),
-            Some(MeshEmissive::Point(pl)) => self.pointlights.push(pl),
-            None => {}
-        }
-        self.meshinstances.push(object::MeshReference {
+        let prop = material.prop;
+        let meshref = object::MeshReference {
             owtrans,
             cutout,
             cutoutparams,
             material,
             triref,
-        });
+        };
+        self.meshlights.push(object::from_emissive(
+            &self.meshtris[triref].1,
+            owtrans,
+            &prop,
+            object::MeshLight::emissive_instance(
+                self.meshlights[triref].as_ref().map(|l| &l.0),
+                &meshref,
+            ),
+        ));
+        self.meshinstances.push(meshref);
         true
     }
 
@@ -174,6 +182,10 @@ impl World {
                 core::mem::take(&mut self.spheres).into_boxed_slice(),
             ))
         }
+        self.meshlights = core::mem::take(&mut self.meshlights)
+            .into_iter()
+            .filter(|l| l.is_some())
+            .collect();
     }
 
     pub(super) fn intersect(&self, ray: &mut ray::Rayx4, depth: u16) {
@@ -223,17 +235,90 @@ impl World {
         ray.collapse();
     }
 
+    // whittedism
     pub(super) fn shadowrays(&self, point: Vec3) -> impl Iterator<Item = ray::ShadowRay> {
+        let nanuv = Vec2::broadcast(f32::NAN);
         core::iter::chain(
             core::iter::chain(
-                self.pointlights.iter().map(move |l| l.rayto(point)),
-                self.planelights.iter().map(move |l| l.rayto(point)),
+                self.pointlights.iter().map(move |l| l.rayto(point, nanuv)),
+                core::iter::chain(
+                    self.meshlights.iter().map(move |l| {
+                        l.as_ref()
+                            .expect("World::shadowrays called before World::finish")
+                            .1
+                            .rayto(point, nanuv)
+                    }),
+                    self.spherelights.iter().map(move |l| l.rayto(point, nanuv)),
+                ),
             ),
             core::iter::chain(
-                self.directionallights.iter().map(move |l| l.rayto(point)),
-                self.spotlights.iter().map(move |l| l.rayto(point)),
+                self.directionallights
+                    .iter()
+                    .map(move |l| l.rayto(point, nanuv)),
+                self.spotlights.iter().map(move |l| l.rayto(point, nanuv)),
             ),
         )
+    }
+
+    pub(super) fn lightrays(
+        &self,
+        point: &Vec3,
+        uv: &mut samplers::AnySampler,
+        samples: u16,
+    ) -> Vec<(ray::ShadowRay, f32)> {
+        let mut out = Vec::with_capacity(
+            self.pointlights.len()
+                + self.meshlights.len() * samples as usize
+                + self.directionallights.len()
+                + self.spotlights.len(),
+        );
+        let n = utils::factor(samples);
+        let m = samples / n;
+        let invsamp = (samples as f32).recip();
+        for l in self.pointlights.iter() {
+            out.push((l.rayto(*point, uv.next2()), l.cos_angular_radius(*point)));
+        }
+        for l in self.meshlights.iter() {
+            let l = &l
+                .as_ref()
+                .expect("World::lightrays called before World::finish")
+                .0;
+            let c = l.cos_angular_radius(*point);
+            let sample = uv.next2();
+            for i in 0..m {
+                for j in 0..n {
+                    let uv = Vec2::new(
+                        ((i as f32 + sample.x) / m as f32).min(1.),
+                        ((j as f32 + sample.y) / n as f32).min(1.),
+                    );
+                    let mut r = l.rayto(*point, uv);
+                    r.irradiance *= invsamp;
+                    out.push((r, c));
+                }
+            }
+        }
+        for l in self.directionallights.iter() {
+            out.push((l.rayto(*point, uv.next2()), l.cos_angular_radius(*point)));
+        }
+        for l in self.spherelights.iter() {
+            let c = l.cos_angular_radius(*point);
+            let sample = uv.next2();
+            for i in 0..m {
+                for j in 0..n {
+                    let uv = Vec2::new(
+                        ((i as f32 + sample.x) / m as f32).min(1.),
+                        ((j as f32 + sample.y) / n as f32).min(1.),
+                    );
+                    let mut r = l.rayto(*point, uv);
+                    r.irradiance *= invsamp;
+                    out.push((r, c));
+                }
+            }
+        }
+        for l in self.spotlights.iter() {
+            out.push((l.rayto(*point, uv.next2()), l.cos_angular_radius(*point)));
+        }
+        out
     }
 
     pub(super) fn sample_environment(&self, dir: Vec3) -> Vec3 {

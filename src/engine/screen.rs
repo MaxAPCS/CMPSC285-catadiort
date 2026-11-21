@@ -28,6 +28,7 @@ impl Screen {
     /// - hslice: range of heights
     /// - seed: sampler pcg32 seed
     pub fn create(
+        sampler: crate::options::Sampler,
         frame: Box<[Vec3]>,
         eyepos: Vec3,
         tofwd: Vec3,
@@ -37,7 +38,6 @@ impl Screen {
         lensrad: f32,
         res: (u32, u32, u32),
         hslice: Range<u32>,
-        sampler: crate::options::Sampler,
         seed: u64,
     ) -> Self {
         debug_assert!((res.0 * hslice.len() as u32 * res.2 * res.2) % 4 == 0);
@@ -52,7 +52,10 @@ impl Screen {
             f32x4::splat((res.0 as f32).recip()),
             f32x4::splat((res.1 as f32).recip()),
         );
+        #[cfg(feature = "gaussian_weights")]
         let weights = wider::gaussian_weights(res.2 as _);
+        #[cfg(not(feature = "gaussian_weights"))]
+        let weights = Vec3x4::broadcast(f32x4::splat(((res.2 * res.2) as f32).recip()));
 
         Self {
             frame,
@@ -84,7 +87,10 @@ impl Screen {
 
                 (
                     (j * res.0 + i).into(),
+                    #[cfg(feature = "gaussian_weights")]
                     Vec3x4::broadcast(n.as_array_ref().map(|n| weights[n as usize]).into()),
+                    #[cfg(not(feature = "gaussian_weights"))]
+                    weights,
                     ray::Rayx4::new(raysrc, raydir, rayspl),
                 )
             })
@@ -94,7 +100,7 @@ impl Screen {
     }
 
     #[allow(private_bounds)]
-    pub fn process<I: Integrator>(&mut self, world: &world::World, max_depth: u16) {
+    pub fn process<I: Integrator>(&mut self, integrator: I, world: &world::World, max_depth: u16) {
         #[cfg(any(
             feature = "aovraydir",
             feature = "aovdepth",
@@ -106,7 +112,8 @@ impl Screen {
             return;
         }
         for depth in (0..=max_depth).step_by(2) {
-            Self::_pass::<I>(
+            Self::_pass(
+                integrator,
                 &mut self.frame,
                 &mut self.raysone,
                 &mut self.raystwo,
@@ -116,7 +123,8 @@ impl Screen {
             if self.raystwo.is_empty() || depth == max_depth {
                 break;
             }
-            Self::_pass::<I>(
+            Self::_pass(
+                integrator,
                 &mut self.frame,
                 &mut self.raystwo,
                 &mut self.raysone,
@@ -134,6 +142,7 @@ impl Screen {
     }
 
     fn _pass<I: Integrator>(
+        integrator: I,
         frame: &mut Box<[Vec3]>,
         src: &mut RayBuf,
         dst: &mut RayBuf,
@@ -152,7 +161,7 @@ impl Screen {
         let mut contribs = Vec::with_capacity(src.len());
         let mut children = Vec::with_capacity(src.len() / 2);
         src.into_par_iter()
-            .map(|(idxs, wghs, rays)| I::integrate(&world, idxs, *wghs, rays, depth))
+            .map(|(idxs, wghs, rays)| integrator.integrate(&world, idxs, *wghs, rays, depth))
             .unzip_into_vecs(&mut contribs, &mut children);
 
         // Write Colors
@@ -163,7 +172,7 @@ impl Screen {
         });
 
         // Serialize Children
-        let mut children: Vec<_> = children.into_par_iter().flatten_iter().collect(); // fixme use accumx4 instead
+        let mut children: Vec<_> = children.into_par_iter().flatten_iter().collect(); // todo use accumx4 instead
         let mut children = children.par_chunks_exact_mut(4);
         let rem = children.remainder();
         let last = if !rem.is_empty() {

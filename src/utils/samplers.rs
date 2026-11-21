@@ -9,6 +9,8 @@ trait Sampler: Send {
         Self: Sized;
     fn next1(&mut self) -> f32;
     fn next2(&mut self) -> Vec2;
+    #[allow(unused)]
+    fn skip(&mut self, n: u64);
 }
 
 #[derive(Clone, Default)]
@@ -39,6 +41,13 @@ impl AnySamplerx4 {
     pub fn next2(&mut self) -> Vec2x4 {
         core::array::from_fn(|i| self.0[i].next2()).into()
     }
+
+    // #[inline]
+    // pub fn skip(&mut self, n: u64) {
+    //     for s in &mut self.0 {
+    //         s.skip(n);
+    //     }
+    // }
 }
 impl Into<[AnySampler; 4]> for AnySamplerx4 {
     fn into(self) -> [AnySampler; 4] {
@@ -94,7 +103,7 @@ impl AnySampler {
     }
 
     #[inline]
-    pub(super) fn next2(&mut self) -> Vec2 {
+    pub fn next2(&mut self) -> Vec2 {
         match self {
             Self::Center(inner) => inner.next2(),
             Self::Independent(inner) => inner.next2(),
@@ -103,6 +112,17 @@ impl AnySampler {
             Self::Sobol(inner) => inner.next2(),
         }
     }
+
+    // #[inline]
+    // pub fn skip(&mut self, n: u64) {
+    //     match self {
+    //         Self::Center(inner) => inner.skip(n),
+    //         Self::Independent(inner) => inner.skip(n),
+    //         Self::Stratified(inner) => inner.skip(n),
+    //         Self::Halton(inner) => inner.skip(n),
+    //         Self::Sobol(inner) => inner.skip(n),
+    //     }
+    // }
 }
 impl Default for AnySampler {
     fn default() -> Self {
@@ -130,6 +150,9 @@ impl Sampler for Center {
     fn next2(&mut self) -> Vec2 {
         Vec2::broadcast(0.5)
     }
+
+    #[inline]
+    fn skip(&mut self, _n: u64) {}
 }
 
 #[derive(Clone)]
@@ -162,6 +185,11 @@ impl Sampler for Independent {
     fn next2(&mut self) -> Vec2 {
         Vec2::new(self.rng.uniform(), self.rng.uniform())
     }
+
+    #[inline]
+    fn skip(&mut self, n: u64) {
+        self.rng.advance(n);
+    }
 }
 
 #[derive(Clone)]
@@ -179,14 +207,7 @@ impl Sampler for Stratified {
     where
         Self: Sized,
     {
-        let mut factor = 1;
-        for x in (2..=spp.isqrt()).rev() {
-            if spp % x == 0 {
-                factor = x;
-                break;
-            }
-        }
-        debug_assert_eq!(factor * (spp / factor), spp);
+        let factor = super::factor(spp);
         let mut nself = Self {
             rng: Pcg32::new(),
             seed,
@@ -220,6 +241,12 @@ impl Sampler for Stratified {
         )
         .min_by_component(Vec2::broadcast(ONE_MINUS_EPSILON))
     }
+
+    #[inline]
+    fn skip(&mut self, n: u64) {
+        self.dimension += n as i32;
+        self.rng.advance(n);
+    }
 }
 impl Stratified {
     #[inline]
@@ -230,9 +257,6 @@ impl Stratified {
 
 #[derive(Clone)]
 pub struct Halton {
-    rng: Pcg32,
-    seed: u64,
-
     index: u16,
     hash: u64,
     dimension: i32,
@@ -242,17 +266,11 @@ impl Sampler for Halton {
     where
         Self: Sized,
     {
-        let mut nself = Self {
-            rng: Pcg32::new(),
-            seed,
-
+        Self {
             index: n as _,
             hash: hash3(x as _, y as _, seed),
             dimension: 0,
-        };
-        nself.rng.set_sequence(nself.hash, nself.seed);
-        nself.rng.advance((n as u64).wrapping_mul(65536));
-        nself
+        }
     }
 
     #[inline]
@@ -265,6 +283,11 @@ impl Sampler for Halton {
     #[inline]
     fn next2(&mut self) -> Vec2 {
         Vec2::new(self.next1(), self.next1())
+    }
+
+    #[inline]
+    fn skip(&mut self, n: u64) {
+        self.dimension += n as i32;
     }
 }
 impl Halton {
@@ -284,9 +307,6 @@ impl Halton {
 
 #[derive(Clone)]
 pub struct Sobol {
-    rng: Pcg32,
-    seed: u64,
-
     index: u16,
     hash: u64,
     dimension: i32,
@@ -296,17 +316,11 @@ impl Sampler for Sobol {
     where
         Self: Sized,
     {
-        let mut nself = Self {
-            rng: Pcg32::new(),
-            seed,
-
+        Self {
             index: n as _,
             hash: hash3(x as _, y as _, seed),
             dimension: 0,
-        };
-        nself.rng.set_sequence(nself.hash, nself.seed);
-        nself.rng.advance((n as u64).wrapping_mul(65536));
-        nself
+        }
     }
 
     #[inline]
@@ -321,6 +335,14 @@ impl Sampler for Sobol {
         let dim = self.dim();
         self.dimension += 2;
         dim
+    }
+
+    #[inline]
+    fn skip(&mut self, n: u64) {
+        for _ in 0..n / 2 {
+            // todo is this even right idk???
+            self.next2();
+        }
     }
 }
 impl Sobol {

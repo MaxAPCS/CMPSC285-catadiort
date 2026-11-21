@@ -5,16 +5,12 @@
 //! cosine (and the lobe its exponent). The caller checks the support.
 //! Until you write a warp, it stops the program when called.
 
-use ultraviolet::{Vec2, Vec2x4, Vec3, Vec3x4};
+use ultraviolet::{Rotor3, Vec2, Vec2x4, Vec3, Vec3x4};
 use wide::{CmpEq, CmpGt, f32x4};
 
 #[inline]
 pub fn recenter(x: Vec3, center: Vec3) -> Vec3 {
-    x.rotated_by(center.geom(Vec3::unit_z()).scaled_by(0.5))
-}
-#[inline]
-pub fn recenterx4(x: Vec3x4, center: Vec3x4) -> Vec3x4 {
-    x.rotated_by(center.geom(Vec3x4::unit_z()).scaled_by(f32x4::HALF))
+    x.rotated_by(Rotor3::from_rotation_between(Vec3::unit_z(), center))
 }
 
 /// A point in the unit disk, (x, y, 0), by Shirley and Chiu's concentric
@@ -63,14 +59,14 @@ pub fn sample_cosine_hemisphere(uv: Vec2) -> Vec3 {
     out.z = (1. - out.x * out.x - out.y * out.y).max(0.).sqrt();
     out
 }
-#[inline]
-pub fn sample_cosine_hemispherex4(uv: Vec2x4) -> Vec3x4 {
-    let mut out = sample_concentric_diskx4(uv);
-    out.z = (1. - out.x * out.x - out.y * out.y)
-        .fast_max(f32x4::ZERO)
-        .sqrt();
-    out
-}
+// #[inline]
+// pub fn sample_cosine_hemispherex4(uv: Vec2x4) -> Vec3x4 {
+//     let mut out = sample_concentric_diskx4(uv);
+//     out.z = (1. - out.x * out.x - out.y * out.y)
+//         .fast_max(f32x4::ZERO)
+//         .sqrt();
+//     out
+// }
 pub const fn cosine_hemisphere_pdf(cos_theta: f32) -> f32 {
     cos_theta.max(0.) * concentric_disk_pdf()
 }
@@ -100,13 +96,13 @@ pub const fn uniform_sphere_pdf() -> f32 {
 
 /// A direction uniform in the cone about +z whose half-angle has cosine
 /// cos_theta_max (in [-1, 1)): the sphere light's sampler.
-pub fn sample_uniform_cone(uv: Vec2, cos_theta_max: f32) -> Vec3 {
-    let z = 1. - uv.x * (1. - cos_theta_max);
+pub fn sample_uniform_cone(uv: Vec2, one_minus_cos_theta_max: f32) -> Vec3 {
+    let z = 1. - uv.x * one_minus_cos_theta_max;
     let phi = 2. * core::f32::consts::PI * uv.y;
     archimedes(z, phi)
 }
-pub const fn uniform_cone_pdf(cos_theta_max: f32) -> f32 {
-    core::f32::consts::FRAC_1_PI / (2. * (1. - cos_theta_max))
+pub const fn uniform_cone_pdf(one_minus_cos_theta_max: f32) -> f32 {
+    core::f32::consts::FRAC_1_PI / (2. * one_minus_cos_theta_max)
 }
 
 /// Barycentric coordinates (b0, b1, b2) uniform over a triangle. Density 2
@@ -181,9 +177,9 @@ pub mod test {
                 }
                 "uniform_sphere" => (sample_uniform_sphere(u), uniform_sphere_pdf()),
                 "uniform_cone" => {
-                    let p = sample_uniform_cone(u, param);
+                    let p = sample_uniform_cone(u, 1. - param);
                     let pdf = if p.z >= param {
-                        uniform_cone_pdf(param)
+                        uniform_cone_pdf(1. - param)
                     } else {
                         0.0
                     };
@@ -208,4 +204,15 @@ pub mod test {
         }
         0
     }
+}
+
+#[inline]
+pub fn orthonormal_basis(n: Vec3) -> (Vec3, Vec3) {
+    let sign = 1f32.copysign(n.z);
+    let a = -1. / (sign + n.z);
+    let b = n.x * n.y * a;
+    (
+        Vec3::new(1. + sign * n.x * n.x * a, sign * b, -sign * n.x),
+        Vec3::new(b, sign + n.y * n.y * a, -n.y),
+    )
 }

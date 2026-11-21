@@ -6,9 +6,10 @@ use super::Primitive;
 use crate::api::{RtCutoutFn, RtShadeContext};
 use crate::engine::{Material, ray, wider};
 
+#[derive(Clone)]
 pub struct Sphere {
     /// World to Object Transform
-    wotrans: Mat4,
+    pub(super) wotrans: Mat4,
     /// Dual of Object to World Transform
     owtrans_dual: Mat4,
 
@@ -17,7 +18,7 @@ pub struct Sphere {
     cutoutparams: Option<Arc<[u8]>>,
 
     /// Material Properties
-    material: Arc<Material>,
+    pub(super) material: Arc<Material>,
 }
 
 impl Primitive for Sphere {
